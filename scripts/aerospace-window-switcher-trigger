@@ -1,0 +1,49 @@
+#!/bin/sh
+
+set -u
+
+runtime_id=io.github.tovifun.aerospace-companion.window-switcher
+pid_file="/tmp/$runtime_id.$(/usr/bin/id -u).pid"
+install_root=${AEROSPACE_COMPANION_HOME:-"$HOME/.local/share/aerospace-companion"}
+app="$install_root/AeroSpaceWindowSwitcher.app"
+binary="$app/Contents/MacOS/aerospace-window-switcher"
+direction=${1:---forward}
+
+case "$direction" in
+    --forward|--reverse|--daemon) ;;
+    *)
+        printf 'Usage: %s [--forward|--reverse|--daemon]\n' "$0" >&2
+        exit 2
+        ;;
+esac
+
+if [ -r "$pid_file" ]; then
+    pid=$(/bin/cat "$pid_file" 2>/dev/null)
+    case "$pid" in
+        ''|*[!0-9]*) ;;
+        *)
+            command=$(/bin/ps -p "$pid" -o command= 2>/dev/null)
+            case "$command" in
+                *"$binary"*)
+                    if [ "$direction" = "--daemon" ]; then
+                        exit 0
+                    elif [ "$direction" = "--reverse" ]; then
+                        signal=USR2
+                    else
+                        signal=USR1
+                    fi
+                    if /bin/kill -"$signal" "$pid" 2>/dev/null; then
+                        exit 0
+                    fi
+                    ;;
+            esac
+            ;;
+    esac
+fi
+
+if [ ! -d "$app" ]; then
+    printf 'AeroSpace Window Switcher is not installed at %s\n' "$app" >&2
+    exit 1
+fi
+
+exec /usr/bin/open -gj "$app" --args "$direction"

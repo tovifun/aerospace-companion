@@ -1,0 +1,45 @@
+#!/usr/bin/env zsh
+
+set -euo pipefail
+
+target="${1:-}"
+script_dir="${0:A:h}"
+prompt="${AEROSPACE_COMPANION_PROMPT:-$script_dir/aerospace-workspace-prompt}"
+
+if [[ -z "$target" ]]; then
+  target="$("$prompt" 2>/dev/null || true)"
+fi
+
+if [[ -z "$target" ]]; then
+  exit 0
+fi
+
+if [[ "$target" != [1-9] ]]; then
+  print -u2 "Workspace must be a number from 1 to 9."
+  exit 2
+fi
+
+if (( $+commands[aerospace] )); then
+  aerospace_bin="$commands[aerospace]"
+elif [[ -x /opt/homebrew/bin/aerospace ]]; then
+  aerospace_bin=/opt/homebrew/bin/aerospace
+elif [[ -x /usr/local/bin/aerospace ]]; then
+  aerospace_bin=/usr/local/bin/aerospace
+else
+  print -u2 "AeroSpace CLI was not found."
+  exit 1
+fi
+
+app_id="$("$aerospace_bin" list-windows --focused --format '%{app-bundle-id}' | head -n 1)"
+
+if [[ -z "$app_id" ]]; then
+  exit 1
+fi
+
+"$aerospace_bin" list-windows --monitor all --app-bundle-id "$app_id" --format '%{window-id}' |
+  while read -r window_id; do
+    [[ -n "$window_id" ]] &&
+      "$aerospace_bin" move-node-to-workspace --window-id "$window_id" "$target"
+  done
+
+"$aerospace_bin" workspace "$target"
