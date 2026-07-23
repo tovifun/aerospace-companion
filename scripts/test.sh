@@ -12,6 +12,9 @@ sh -n "$root_dir/scripts/aerospace-window-switcher-trigger"
 zsh -n "$root_dir/scripts/aerospace-move-focused-app-to-workspace"
 plutil -lint "$root_dir/resources/Info.plist"
 
+grep -q 'loadWindows(presentErrors: false)' \
+    "$root_dir/src/window-switcher/main.swift"
+
 personal_matches=$(
     grep -R "/Users/tovizhong\\|com\\.tovizhong" \
         "$root_dir/src" "$root_dir/config" "$root_dir/resources" 2>/dev/null || true

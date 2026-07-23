@@ -314,7 +314,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if CommandLine.arguments.contains("--daemon") {
-            loadWindows()
+            // AeroSpace may not have created its socket yet during login or installation.
+            // Keep the daemon responsive so the first shortcut can retry the load.
+            loadWindows(presentErrors: false)
             return
         }
         showSwitcher()
@@ -339,7 +341,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func loadWindows() {
+    private func loadWindows(presentErrors: Bool = true) {
         loadGeneration += 1
         let generation = loadGeneration
         isRefreshing = true
@@ -360,7 +362,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.isLoaded = true
                     self.isRefreshing = false
                     guard !self.orderedItems.isEmpty else {
-                        self.showError("No windows or applications are currently available.")
+                        if presentErrors {
+                            self.showError("No windows or applications are currently available.")
+                        }
                         return
                     }
                     self.refreshContent()
@@ -373,7 +377,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                 DispatchQueue.main.async { [weak self] in
                     guard let self, self.loadGeneration == generation else { return }
                     self.isRefreshing = false
-                    self.showError(error.localizedDescription)
+                    if presentErrors {
+                        self.showError(error.localizedDescription)
+                    }
                 }
             }
         }
