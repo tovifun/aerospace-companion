@@ -42,6 +42,15 @@ runtime_id=io.github.tovifun.aerospace-companion.window-switcher
 pid_file="/tmp/$runtime_id.$(/usr/bin/id -u).pid"
 app_dest="$install_root/AeroSpaceWindowSwitcher.app"
 state_file="$install_root/install-state"
+previous_config_path=
+previous_config_backup=
+previous_config_created=0
+
+if [ -f "$state_file" ]; then
+    previous_config_path=$(sed -n 's/^config_path=//p' "$state_file")
+    previous_config_backup=$(sed -n 's/^config_backup=//p' "$state_file")
+    previous_config_created=$(sed -n 's/^config_created=//p' "$state_file")
+fi
 
 if [ -r "$pid_file" ]; then
     pid=$(/bin/cat "$pid_file" 2>/dev/null || true)
@@ -78,6 +87,10 @@ install -m 755 "$root_dir/scripts/aerospace-window-switcher-trigger" \
     "$bin_dir/aerospace-window-switcher-trigger"
 install -m 755 "$root_dir/scripts/aerospace-move-focused-app-to-workspace" \
     "$bin_dir/aerospace-move-focused-app-to-workspace"
+install -m 755 "$root_dir/scripts/aerospace-float-secondary-window" \
+    "$bin_dir/aerospace-float-secondary-window"
+install -m 755 "$root_dir/scripts/install-online.sh" \
+    "$bin_dir/aerospace-companion-update"
 install -m 755 "$root_dir/scripts/uninstall.sh" \
     "$bin_dir/aerospace-companion-uninstall"
 
@@ -116,12 +129,6 @@ if [ "$with_config" -eq 1 ]; then
     rm -f "$rendered_config"
 fi
 
-{
-    printf 'config_path=%s\n' "$config_path"
-    printf 'config_backup=%s\n' "$config_backup"
-    printf 'config_created=%s\n' "$config_created"
-} > "$state_file"
-
 find_aerospace() {
     if command -v aerospace >/dev/null 2>&1; then
         command -v aerospace
@@ -149,6 +156,23 @@ if [ "$with_config" -eq 1 ] &&
     fi
     "$aerospace_bin" reload-config
 fi
+
+state_config_path=$config_path
+state_config_backup=$config_backup
+state_config_created=$config_created
+
+if [ -n "$previous_config_path" ] &&
+   { [ "$with_config" -eq 0 ] || [ "$previous_config_path" = "$config_path" ]; }; then
+    state_config_path=$previous_config_path
+    state_config_backup=$previous_config_backup
+    state_config_created=$previous_config_created
+fi
+
+{
+    printf 'config_path=%s\n' "$state_config_path"
+    printf 'config_backup=%s\n' "$state_config_backup"
+    printf 'config_created=%s\n' "$state_config_created"
+} > "$state_file"
 
 if [ "${AEROSPACE_COMPANION_SKIP_LAUNCH:-0}" != "1" ]; then
     /usr/bin/open -gj "$app_dest" --args --daemon

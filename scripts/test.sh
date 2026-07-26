@@ -7,10 +7,15 @@ root_dir=$(dirname "$script_dir")
 
 sh -n "$root_dir/scripts/build.sh"
 sh -n "$root_dir/scripts/install.sh"
+sh -n "$root_dir/scripts/install-online.sh"
 sh -n "$root_dir/scripts/uninstall.sh"
 sh -n "$root_dir/scripts/aerospace-window-switcher-trigger"
+zsh -n "$root_dir/scripts/aerospace-float-secondary-window"
 zsh -n "$root_dir/scripts/aerospace-move-focused-app-to-workspace"
 plutil -lint "$root_dir/resources/Info.plist"
+
+grep -q 'loadWindows(presentErrors: false)' \
+    "$root_dir/src/window-switcher/main.swift"
 
 personal_matches=$(
     grep -R "/Users/tovizhong\\|com\\.tovizhong" \
@@ -42,6 +47,8 @@ AEROSPACE_COMPANION_SKIP_RELOAD=1 \
 
 test -x "$test_home/.local/bin/aerospace-window-switcher-trigger"
 test -x "$test_home/.local/bin/aerospace-move-focused-app-to-workspace"
+test -x "$test_home/.local/bin/aerospace-float-secondary-window"
+test -x "$test_home/.local/bin/aerospace-companion-update"
 test -x "$test_home/.local/bin/aerospace-workspace-prompt"
 test -d "$test_home/.local/share/aerospace-companion/AeroSpaceWindowSwitcher.app"
 grep -q '^# AeroSpace Companion configuration' "$test_home/.aerospace.toml"
@@ -50,11 +57,54 @@ if grep -q '__HOME__\\|__TERMINAL_APP__' "$test_home/.aerospace.toml"; then
     exit 1
 fi
 
+original_backup=$(
+    sed -n 's/^config_backup=//p' \
+        "$test_home/.local/share/aerospace-companion/install-state"
+)
+
+HOME="$test_home" \
+AEROSPACE_COMPANION_SKIP_LAUNCH=1 \
+AEROSPACE_COMPANION_SKIP_RELOAD=1 \
+"$root_dir/scripts/install.sh" --with-config
+
+updated_backup=$(
+    sed -n 's/^config_backup=//p' \
+        "$test_home/.local/share/aerospace-companion/install-state"
+)
+test "$updated_backup" = "$original_backup"
+
 HOME="$test_home" \
 AEROSPACE_COMPANION_SKIP_RELOAD=1 \
 "$test_home/.local/bin/aerospace-companion-uninstall" --restore-config
 
 grep -q '^# original config' "$test_home/.aerospace.toml"
 test ! -e "$test_home/.local/share/aerospace-companion"
+
+archive_path="$test_root/aerospace-companion.tar.gz"
+tar -czf "$archive_path" \
+    --exclude .git \
+    --exclude build \
+    -C "$(dirname "$root_dir")" \
+    "$(basename "$root_dir")"
+
+online_home="$test_root/online-home"
+mkdir -p "$online_home"
+printf '# online original config\n' > "$online_home/.aerospace.toml"
+
+HOME="$online_home" \
+AEROSPACE_COMPANION_ARCHIVE_URL="file://$archive_path" \
+AEROSPACE_COMPANION_SKIP_LAUNCH=1 \
+AEROSPACE_COMPANION_SKIP_RELOAD=1 \
+"$root_dir/scripts/install-online.sh"
+
+test -x "$online_home/.local/bin/aerospace-companion-update"
+grep -q '^# AeroSpace Companion configuration' "$online_home/.aerospace.toml"
+
+HOME="$online_home" \
+AEROSPACE_COMPANION_SKIP_RELOAD=1 \
+"$online_home/.local/bin/aerospace-companion-uninstall" --restore-config
+
+grep -q '^# online original config' "$online_home/.aerospace.toml"
+test ! -e "$online_home/.local/share/aerospace-companion"
 
 printf 'All checks passed.\n'

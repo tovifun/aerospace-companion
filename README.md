@@ -14,7 +14,11 @@ window of the focused app to another workspace.
 - Running apps without windows are included and can be reopened.
 - Compact translucent panel that follows the macOS light or dark appearance.
 - `Option + Shift + M`: move every window of the focused app to workspace 1-9.
-- A complete, low-gap AeroSpace configuration for daily use.
+- Automatic app routing for development, browsers, communication, media, and
+  design workspaces.
+- Floating rules for writing tools, utilities, and secondary WeChat/Feishu
+  windows.
+- Persistent workspaces, dual-monitor assignments, and an arrange mode.
 
 ## Requirements
 
@@ -28,14 +32,23 @@ brew install --cask nikitabobko/tap/aerospace
 
 ## Install
 
+Install or update everything with one command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tovifun/aerospace-companion/main/scripts/install-online.sh | sh
+```
+
+The installer backs up the active AeroSpace config, installs the included
+configuration, builds the native tools locally, and reloads AeroSpace. It
+supports both Apple Silicon and Intel Macs.
+
+For a manual checkout:
+
 ```bash
 git clone https://github.com/tovifun/aerospace-companion.git
 cd aerospace-companion
 ./scripts/install.sh --with-config
 ```
-
-`--with-config` backs up the existing AeroSpace config before installing the
-included configuration. Without it, only the companion tools are installed.
 
 Ghostty is the default terminal for `Option + Enter`. Choose another app at
 install time:
@@ -44,8 +57,31 @@ install time:
 AEROSPACE_TERMINAL_APP=Kitty ./scripts/install.sh --with-config
 ```
 
-The installer builds the Swift tools locally and installs them under
-`~/.local`. It supports both Apple Silicon and Intel Macs.
+Without `--with-config`, the local installer updates only the companion tools.
+
+## Update
+
+After the first installation, update to the latest version and apply its config:
+
+```bash
+~/.local/bin/aerospace-companion-update
+```
+
+Updates back up the current config before replacing it.
+
+## Workspace Routing
+
+| Workspace | Category | Apps |
+| --- | --- | --- |
+| `1` | Development | Codex, Claude, Zed, Cursor, VS Code, Xcode, Ghostty, DataGrip, Fork, OpenCode |
+| `2` | Browsers | Chrome, Safari, Edge, Dia, Vivaldi, ChatGPT Atlas |
+| `3` | Communication | Feishu, WeChat, WeCom, Tencent Meeting, Mail |
+| `4` | Media | Music, NetEase Music, Soda Music, VLC, Bilibili, Douyin, TV |
+| `5` | Design | Figma, Eagle, RightFont, OBS, Screen Studio, Audacity |
+
+Workspaces 1-2 prefer the main display. Workspaces 3-9 prefer the built-in
+display and fall back to the main display. Writing and task apps stay on the
+current workspace as floating windows.
 
 ## Key Bindings
 
@@ -63,6 +99,13 @@ The installer builds the Swift tools locally and installs them under
 | `Option + Shift + Space` | Toggle floating and tiling |
 | `Option + F` | Toggle fullscreen |
 | `Option + B` | Switch to the previous workspace |
+| `Option + S` | Enter arrange mode |
+| `Option + Control + H/J/K/L` | Focus another monitor |
+| `Option + Control + Shift + H/J/K/L` | Move the window to another monitor |
+
+In arrange mode, use `H/J/K/L` to swap windows,
+`Shift + H/J/K/L` to group windows, `R` to flatten the workspace, and `Esc` to
+exit.
 
 ## Uninstall
 

@@ -3,9 +3,18 @@
 
 config-version = 2
 
-start-at-login = true
+start-at-login = false
 auto-reload-config = true
-after-startup-command = ['exec-and-forget __HOME__/.local/bin/aerospace-window-switcher-trigger --daemon']
+persistent-workspaces = ['1', '2', '3', '4', '5']
+
+after-startup-command = [
+    'exec-and-forget __HOME__/.local/bin/aerospace-window-switcher-trigger --daemon',
+    'layout --workspace 1 --root h_accordion',
+    'layout --workspace 2 --root h_accordion',
+    'layout --workspace 3 --root h_tiles',
+    'layout --workspace 4 --root h_accordion',
+    'layout --workspace 5 --root h_tiles',
+]
 
 default-root-container-layout = 'tiles'
 default-root-container-orientation = 'auto'
@@ -14,7 +23,6 @@ enable-normalization-flatten-containers = true
 enable-normalization-opposite-orientation-for-nested-containers = true
 
 accordion-padding = 0
-on-focused-monitor-changed = ['move-mouse monitor-lazy-center']
 
 gaps.inner.horizontal = 4
 gaps.inner.vertical = 4
@@ -22,6 +30,119 @@ gaps.outer.left = 4
 gaps.outer.bottom = 4
 gaps.outer.top = 4
 gaps.outer.right = 4
+
+on-window-detected = [
+    # Feishu media previews run in a separate helper process.
+    { if = 'test %{app-bundle-id} = com.electron.lark.helper', run = 'layout floating' },
+
+    # Writing and task apps stay on the current workspace as floating windows.
+    { if = 'test %{app-bundle-id} = com.nickustinov.itsypad', run = 'layout floating' },
+    { if = 'test %{app-bundle-id} = com.iconfactory.Tot', run = 'layout floating' },
+    { if = 'test %{app-bundle-id} = pro.writer.mac', run = 'layout floating' },
+    { if = 'test %{app-bundle-id} = abnerworks.Typora', run = 'layout floating' },
+    { if = 'test %{app-bundle-id} = com.sabotage.clearly', run = 'layout floating' },
+    { if = 'test %{app-bundle-id} = net.shinyfrog.lettera', run = 'layout floating' },
+    { if = 'test %{app-bundle-id} = com.apple.Notes', run = 'layout floating' },
+    { if = 'test %{app-bundle-id} = com.apple.TextEdit', run = 'layout floating' },
+    { if = 'test %{app-bundle-id} = com.apple.iCal', run = 'layout floating' },
+    { if = 'test %{app-bundle-id} = com.apple.reminders', run = 'layout floating' },
+
+    # Short-lived utility windows should not disturb the tiling tree.
+    { if = 'test %{app-bundle-id} = pl.maketheweb.cleanshotx', run = 'layout floating' },
+    { if = 'test %{app-bundle-id} = me.damir.dropover-mac', run = 'layout floating' },
+    { if = 'test %{app-bundle-id} = org.localsend.localsendApp', run = 'layout floating' },
+    { if = 'test %{app-bundle-id} = net.pornel.ImageOptim', run = 'layout floating' },
+    { if = 'test %{app-bundle-id} = com.tencent.Lemon', run = 'layout floating' },
+    { if = 'test %{app-bundle-id} = com.oplus.devicespace', run = 'layout floating' },
+
+    # Keep extra WeChat and Feishu windows floating without tiling flicker.
+    {
+        if = 'test %{app-bundle-id} = com.tencent.xinWeChat',
+        check-further-callbacks = true,
+        run = [
+            'layout floating',
+            'exec-and-forget __HOME__/.local/bin/aerospace-float-secondary-window com.tencent.xinWeChat',
+        ],
+    },
+    {
+        if = 'test %{app-bundle-id} = com.electron.lark',
+        check-further-callbacks = true,
+        run = [
+            'layout floating',
+            'exec-and-forget __HOME__/.local/bin/aerospace-float-secondary-window com.electron.lark',
+        ],
+    },
+
+    # Workspace 1: development.
+    { if = 'test %{app-bundle-id} = com.openai.codex', run = 'move-node-to-workspace 1' },
+    { if = 'test %{app-bundle-id} = com.anthropic.claudefordesktop', run = 'move-node-to-workspace 1' },
+    { if = 'test %{app-bundle-id} = dev.zed.Zed', run = 'move-node-to-workspace 1' },
+    { if = 'test %{app-bundle-id} = com.todesktop.230313mzl4w4u92', run = 'move-node-to-workspace 1' },
+    { if = 'test %{app-bundle-id} = com.microsoft.VSCode', run = 'move-node-to-workspace 1' },
+    { if = 'test %{app-bundle-id} = dev.zcode.app', run = 'move-node-to-workspace 1' },
+    { if = 'test %{app-bundle-id} = com.apple.dt.Xcode', run = 'move-node-to-workspace 1' },
+    { if = 'test %{app-bundle-id} = com.mitchellh.ghostty', run = 'move-node-to-workspace 1' },
+    { if = 'test %{app-bundle-id} = com.cmuxterm.app', run = 'move-node-to-workspace 1' },
+    { if = 'test %{app-bundle-id} = com.jetbrains.datagrip', run = 'move-node-to-workspace 1' },
+    { if = 'test %{app-bundle-id} = com.DanPristupov.Fork', run = 'move-node-to-workspace 1' },
+    { if = 'test %{app-bundle-id} = ai.opencode.desktop', run = 'move-node-to-workspace 1' },
+    { if = 'test %{app-bundle-id} = com.requestly.api-client', run = 'move-node-to-workspace 1' },
+
+    # Workspace 2: browsers.
+    { if = 'test %{app-bundle-id} = com.google.Chrome', run = 'move-node-to-workspace 2' },
+    { if = 'test %{app-bundle-id} = com.apple.Safari', run = 'move-node-to-workspace 2' },
+    { if = 'test %{app-bundle-id} = com.microsoft.edgemac', run = 'move-node-to-workspace 2' },
+    { if = 'test %{app-bundle-id} = company.thebrowser.dia', run = 'move-node-to-workspace 2' },
+    { if = 'test %{app-bundle-id} = com.vivaldi.Vivaldi', run = 'move-node-to-workspace 2' },
+    { if = 'test %{app-bundle-id} = com.vivaldi.Vivaldi.snapshot', run = 'move-node-to-workspace 2' },
+    { if = 'test %{app-bundle-id} = com.openai.atlas', run = 'move-node-to-workspace 2' },
+
+    # Workspace 3: communication.
+    { if = 'test %{app-bundle-id} = com.electron.lark', run = 'move-node-to-workspace 3' },
+    { if = 'test %{app-bundle-id} = com.tencent.xinWeChat', run = 'move-node-to-workspace 3' },
+    { if = 'test %{app-bundle-id} = com.tencent.WeWorkMac', run = 'move-node-to-workspace 3' },
+    { if = 'test %{app-bundle-id} = com.tencent.meeting', run = 'move-node-to-workspace 3' },
+    { if = 'test %{app-bundle-id} = com.apple.mail', run = 'move-node-to-workspace 3' },
+
+    # Workspace 4: media.
+    { if = 'test %{app-bundle-id} = com.apple.Music', run = 'move-node-to-workspace 4' },
+    { if = 'test %{app-bundle-id} = com.netease.163music', run = 'move-node-to-workspace 4' },
+    { if = 'test %{app-bundle-id} = com.soda.music', run = 'move-node-to-workspace 4' },
+    { if = 'test %{app-bundle-id} = org.videolan.vlc', run = 'move-node-to-workspace 4' },
+    { if = 'test %{app-bundle-id} = com.bilibili.bilibiliPC', run = 'move-node-to-workspace 4' },
+    { if = 'test %{app-bundle-id} = com.bytedance.douyin.desktop', run = 'move-node-to-workspace 4' },
+    { if = 'test %{app-bundle-id} = com.apple.TV', run = 'move-node-to-workspace 4' },
+
+    # Workspace 5: design and content production.
+    { if = 'test %{app-bundle-id} = com.figma.Desktop', run = 'move-node-to-workspace 5' },
+    { if = 'test %{app-bundle-id} = tw.ogdesign.eagle', run = 'move-node-to-workspace 5' },
+    { if = 'test %{app-bundle-id} = com.rightfontapp.RightFont5', run = 'move-node-to-workspace 5' },
+    { if = 'test %{app-bundle-id} = com.obsproject.obs-studio', run = 'move-node-to-workspace 5' },
+    { if = 'test %{app-bundle-id} = com.timpler.screenstudio', run = 'move-node-to-workspace 5' },
+    { if = 'test %{app-bundle-id} = org.audacityteam.audacity', run = 'move-node-to-workspace 5' },
+
+    # System utilities work better as floating windows.
+    { if = 'test %{app-bundle-id} = com.apple.finder', run = 'layout floating' },
+    { if = 'test %{app-bundle-id} = com.apple.systempreferences', run = 'layout floating' },
+    { if = 'test %{app-bundle-id} = com.apple.calculator', run = 'layout floating' },
+    { if = 'test %{app-bundle-id} = com.apple.ActivityMonitor', run = 'layout floating' },
+    { if = 'test %{app-bundle-id} = com.apple.DiskUtility', run = 'layout floating' },
+    { if = 'test %{app-bundle-id} = com.apple.SystemProfiler', run = 'layout floating' },
+    { if = 'test %{app-bundle-id} = com.apple.FontBook', run = 'layout floating' },
+    { if = 'test %{app-bundle-id} = com.apple.keychainaccess', run = 'layout floating' },
+    { if = 'test %{app-bundle-id} = com.apple.Passwords', run = 'layout floating' },
+]
+
+[workspace-to-monitor-force-assignment]
+    1 = 'main'
+    2 = 'main'
+    3 = ['built-in', 'main']
+    4 = ['built-in', 'main']
+    5 = ['built-in', 'main']
+    6 = ['built-in', 'main']
+    7 = ['built-in', 'main']
+    8 = ['built-in', 'main']
+    9 = ['built-in', 'main']
 
 [mode.main.binding]
     # Open terminal
@@ -39,11 +160,27 @@ gaps.outer.right = 4
     alt-tab = 'exec-and-forget __HOME__/.local/bin/aerospace-window-switcher-trigger --forward'
     alt-shift-tab = 'exec-and-forget __HOME__/.local/bin/aerospace-window-switcher-trigger --reverse'
 
+    # Focus monitors by direction or directly.
+    alt-ctrl-h = 'focus-monitor left'
+    alt-ctrl-j = 'focus-monitor down'
+    alt-ctrl-k = 'focus-monitor up'
+    alt-ctrl-l = 'focus-monitor right'
+    alt-ctrl-1 = 'focus-monitor main'
+    alt-ctrl-2 = 'focus-monitor built-in main'
+
     # Move windows
     alt-shift-h = 'move left'
     alt-shift-j = 'move down'
     alt-shift-k = 'move up'
     alt-shift-l = 'move right'
+
+    # Move windows between monitors and keep focus on them.
+    alt-ctrl-shift-h = 'move-node-to-monitor --focus-follows-window left'
+    alt-ctrl-shift-j = 'move-node-to-monitor --focus-follows-window down'
+    alt-ctrl-shift-k = 'move-node-to-monitor --focus-follows-window up'
+    alt-ctrl-shift-l = 'move-node-to-monitor --focus-follows-window right'
+    alt-ctrl-shift-1 = 'move-node-to-monitor --focus-follows-window main'
+    alt-ctrl-shift-2 = 'move-node-to-monitor --focus-follows-window built-in main'
 
     # Resize
     alt-minus = 'resize smart -50'
@@ -67,7 +204,7 @@ gaps.outer.right = 4
     alt-8 = 'workspace 8'
     alt-9 = 'workspace 9'
 
-    # Move current window to workspace and follow it
+    # Move current window to workspace and follow it.
     alt-shift-1 = 'move-node-to-workspace 1; workspace 1'
     alt-shift-2 = 'move-node-to-workspace 2; workspace 2'
     alt-shift-3 = 'move-node-to-workspace 3; workspace 3'
@@ -81,5 +218,22 @@ gaps.outer.right = 4
     # Utilities
     alt-shift-m = 'exec-and-forget __HOME__/.local/bin/aerospace-move-focused-app-to-workspace'
     alt-b = 'workspace-back-and-forth'
+    alt-s = 'mode arrange'
     alt-shift-r = 'flatten-workspace-tree'
     alt-shift-c = 'reload-config'
+
+[mode.arrange.binding]
+    # Swap windows without changing the container structure.
+    h = 'swap left'
+    j = 'swap down'
+    k = 'swap up'
+    l = 'swap right'
+
+    # Group the focused window with its neighbor.
+    shift-h = 'join-with left'
+    shift-j = 'join-with down'
+    shift-k = 'join-with up'
+    shift-l = 'join-with right'
+
+    r = ['flatten-workspace-tree', 'mode main']
+    esc = 'mode main'
