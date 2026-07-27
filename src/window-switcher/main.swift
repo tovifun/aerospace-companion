@@ -9,6 +9,24 @@ private let cycleNotificationName = Notification.Name("\(runtimeIdentifier).cycl
 private let singletonLockPath = "\(runtimePathPrefix).lock"
 private let daemonPIDPath = "\(runtimePathPrefix).pid"
 
+private enum SwitcherStyle {
+    static let surfaceCornerRadius: CGFloat = 18
+    static let rowCornerRadius: CGFloat = 12
+    static let shadowMargin: CGFloat = 24
+    static let contentPadding: CGFloat = 12
+    static let groupSpacing: CGFloat = 10
+    static let groupHeaderHeight: CGFloat = 27
+    static let rowSpacing: CGFloat = 3
+    static let rowHeight: CGFloat = 50
+    static let iconSize: CGFloat = 28
+    static let accentColor = NSColor(
+        srgbRed: 0.20,
+        green: 0.43,
+        blue: 0.96,
+        alpha: 1
+    )
+}
+
 private struct AeroWindow: Decodable {
     let windowID: Int
     let appName: String
@@ -143,28 +161,101 @@ private final class SwitcherPanel: NSPanel {
     override var canBecomeMain: Bool { true }
 }
 
-private final class OverlayView: NSVisualEffectView {
-    var onDismiss: (() -> Void)?
+private final class SurfaceView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = SwitcherStyle.surfaceCornerRadius
+        layer?.cornerCurve = .continuous
+        layer?.borderWidth = 1
+        layer?.shadowColor = NSColor.black.cgColor
+        layer?.shadowOpacity = 0.30
+        layer?.shadowRadius = 22
+        layer?.shadowOffset = CGSize(width: 0, height: -7)
+        updateAppearance()
+    }
 
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        updateBorder()
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layout() {
+        super.layout()
+        layer?.shadowPath = CGPath(
+            roundedRect: bounds,
+            cornerWidth: SwitcherStyle.surfaceCornerRadius,
+            cornerHeight: SwitcherStyle.surfaceCornerRadius,
+            transform: nil
+        )
     }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
-        updateBorder()
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            layer?.backgroundColor = NSColor.clear.cgColor
+            layer?.borderColor = (isDark
+                ? NSColor.white.withAlphaComponent(0.16)
+                : NSColor.black.withAlphaComponent(0.18)
+            ).cgColor
+        }
+    }
+}
+
+private final class GlassBackgroundView: NSVisualEffectView {
+    var onDismiss: (() -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        material = .popover
+        blendingMode = .behindWindow
+        state = .active
+        wantsLayer = true
+        layer?.cornerRadius = SwitcherStyle.surfaceCornerRadius
+        layer?.cornerCurve = .continuous
+        layer?.masksToBounds = true
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
     }
 
     override func mouseDown(with event: NSEvent) {
         onDismiss?()
     }
+}
 
-    private func updateBorder() {
+private final class GlassTintView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        updateAppearance()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        return nil
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            layer?.borderColor = NSColor.separatorColor
-                .withAlphaComponent(0.5)
-                .cgColor
+            let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            layer?.backgroundColor = (isDark
+                ? NSColor(srgbRed: 0.035, green: 0.04, blue: 0.055, alpha: 0.50)
+                : NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.56)
+            ).cgColor
         }
     }
 }
@@ -181,11 +272,14 @@ private final class ActionRow: NSControl {
 
     private var trackingAreaReference: NSTrackingArea?
     private var isHovered = false
+    private weak var primaryLabel: NSTextField?
+    private weak var secondaryLabel: NSTextField?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.cornerRadius = 6
+        layer?.cornerRadius = SwitcherStyle.rowCornerRadius
+        layer?.cornerCurve = .continuous
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
     }
@@ -222,7 +316,7 @@ private final class ActionRow: NSControl {
     }
 
     override func mouseDown(with event: NSEvent) {
-        setBackgroundColor(NSColor.controlAccentColor.withAlphaComponent(0.28))
+        setBackgroundColor(SwitcherStyle.accentColor.withAlphaComponent(0.78))
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -238,17 +332,31 @@ private final class ActionRow: NSControl {
         return true
     }
 
+    func registerLabels(primary: NSTextField, secondary: NSTextField) {
+        primaryLabel = primary
+        secondaryLabel = secondary
+        updateAppearance()
+    }
+
     private func updateAppearance() {
-        let color: NSColor
-        if isSelected {
-            color = NSColor.controlAccentColor.withAlphaComponent(0.22)
-        } else if isHovered {
-            color = NSColor.labelColor.withAlphaComponent(0.07)
-        } else {
-            color = normalColor
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            let color: NSColor
+            if isSelected {
+                color = SwitcherStyle.accentColor
+                primaryLabel?.textColor = .white
+                secondaryLabel?.textColor = NSColor.white.withAlphaComponent(0.76)
+            } else if isHovered {
+                color = NSColor.labelColor.withAlphaComponent(0.065)
+                primaryLabel?.textColor = .labelColor
+                secondaryLabel?.textColor = .secondaryLabelColor
+            } else {
+                color = normalColor
+                primaryLabel?.textColor = .labelColor
+                secondaryLabel?.textColor = .secondaryLabelColor
+            }
+            layer?.backgroundColor = color.cgColor
+            setAccessibilityValue(isSelected ? "Selected" : nil)
         }
-        setBackgroundColor(color)
-        setAccessibilityValue(isSelected ? "Selected" : nil)
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -431,7 +539,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        panel.hasShadow = false
         panel.hidesOnDeactivate = false
         panel.animationBehavior = .none
         panel.alphaValue = 0
@@ -480,15 +588,24 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func makeContentView(for screen: NSScreen) -> NSView {
         itemRows.removeAll()
-        let root = OverlayView()
-        root.material = .popover
-        root.blendingMode = .behindWindow
-        root.state = .active
+        let root = NSView()
         root.wantsLayer = true
-        root.layer?.cornerRadius = 8
-        root.layer?.borderWidth = 0.5
-        root.layer?.masksToBounds = true
-        root.onDismiss = { [weak self] in self?.dismiss() }
+        root.layer?.backgroundColor = NSColor.clear.cgColor
+
+        let surface = SurfaceView()
+        surface.translatesAutoresizingMaskIntoConstraints = false
+        let glass = GlassBackgroundView()
+        glass.translatesAutoresizingMaskIntoConstraints = false
+        glass.onDismiss = { [weak self] in self?.dismiss() }
+        let tint = GlassTintView()
+        tint.translatesAutoresizingMaskIntoConstraints = false
+        glass.addSubview(tint)
+        NSLayoutConstraint.activate([
+            tint.leadingAnchor.constraint(equalTo: glass.leadingAnchor),
+            tint.trailingAnchor.constraint(equalTo: glass.trailingAnchor),
+            tint.topAnchor.constraint(equalTo: glass.topAnchor),
+            tint.bottomAnchor.constraint(equalTo: glass.bottomAnchor),
+        ])
 
         let scrollView = NSScrollView()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -503,7 +620,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         groupStack.translatesAutoresizingMaskIntoConstraints = false
         groupStack.orientation = .vertical
         groupStack.alignment = .width
-        groupStack.spacing = 10
+        groupStack.spacing = SwitcherStyle.groupSpacing
         documentView.addSubview(groupStack)
         scrollView.documentView = documentView
 
@@ -536,12 +653,46 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             documentView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
         ])
 
-        root.addSubview(scrollView)
+        root.addSubview(surface)
+        surface.addSubview(glass)
+        surface.addSubview(scrollView)
         NSLayoutConstraint.activate([
-            scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 8),
-            scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -8),
-            scrollView.topAnchor.constraint(equalTo: root.topAnchor, constant: 8),
-            scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -8),
+            surface.leadingAnchor.constraint(
+                equalTo: root.leadingAnchor,
+                constant: SwitcherStyle.shadowMargin
+            ),
+            surface.trailingAnchor.constraint(
+                equalTo: root.trailingAnchor,
+                constant: -SwitcherStyle.shadowMargin
+            ),
+            surface.topAnchor.constraint(
+                equalTo: root.topAnchor,
+                constant: SwitcherStyle.shadowMargin
+            ),
+            surface.bottomAnchor.constraint(
+                equalTo: root.bottomAnchor,
+                constant: -SwitcherStyle.shadowMargin
+            ),
+            glass.leadingAnchor.constraint(equalTo: surface.leadingAnchor),
+            glass.trailingAnchor.constraint(equalTo: surface.trailingAnchor),
+            glass.topAnchor.constraint(equalTo: surface.topAnchor),
+            glass.bottomAnchor.constraint(equalTo: surface.bottomAnchor),
+            scrollView.leadingAnchor.constraint(
+                equalTo: surface.leadingAnchor,
+                constant: SwitcherStyle.contentPadding
+            ),
+            scrollView.trailingAnchor.constraint(
+                equalTo: surface.trailingAnchor,
+                constant: -SwitcherStyle.contentPadding
+            ),
+            scrollView.topAnchor.constraint(
+                equalTo: surface.topAnchor,
+                constant: SwitcherStyle.contentPadding
+            ),
+            scrollView.bottomAnchor.constraint(
+                equalTo: surface.bottomAnchor,
+                constant: -SwitcherStyle.contentPadding
+            ),
         ])
 
         return root
@@ -550,12 +701,23 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private func switcherFrame(for screen: NSScreen) -> NSRect {
         let groups = workspaceGroups()
         let groupCount = groups.count + (windowlessApps.isEmpty ? 0 : 1)
-        let listHeight = CGFloat(groupCount * 24 + orderedItems.count * 32)
-            + CGFloat(max(0, groupCount - 1) * 10)
+        let listHeight = CGFloat(groupCount) * SwitcherStyle.groupHeaderHeight
+            + CGFloat(orderedItems.count) * SwitcherStyle.rowHeight
+            + CGFloat(orderedItems.count) * SwitcherStyle.rowSpacing
+            + CGFloat(max(0, groupCount - 1)) * SwitcherStyle.groupSpacing
         let visibleFrame = screen.visibleFrame
-        let width = min(560, max(280, visibleFrame.width - 48))
-        let maximumHeight = min(620, max(80, visibleFrame.height - 96))
-        let height = min(max(80, listHeight + 16), maximumHeight)
+        let width = min(588, max(360, visibleFrame.width - 48))
+        let maximumHeight = min(700, max(144, visibleFrame.height - 48))
+        let surfaceChromeHeight = SwitcherStyle.contentPadding * 2
+        let height = min(
+            max(
+                176,
+                listHeight
+                    + surfaceChromeHeight
+                    + SwitcherStyle.shadowMargin * 2
+            ),
+            maximumHeight
+        )
 
         return NSRect(
             x: visibleFrame.midX - width / 2,
@@ -569,22 +731,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .width
-        stack.spacing = 0
-
-        let header = NSView()
-        header.translatesAutoresizingMaskIntoConstraints = false
-        let workspace = textLabel(
-            group.workspace,
-            size: 12,
-            color: .secondaryLabelColor
-        )
-        header.addSubview(workspace)
-        NSLayoutConstraint.activate([
-            header.heightAnchor.constraint(equalToConstant: 24),
-            workspace.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 6),
-            workspace.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-        ])
-        stack.addArrangedSubview(header)
+        stack.spacing = SwitcherStyle.rowSpacing
+        stack.addArrangedSubview(makeGroupHeader("WORKSPACE \(group.workspace)"))
 
         for window in group.windows {
             let row = makeWindowRow(window)
@@ -598,22 +746,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .width
-        stack.spacing = 0
-
-        let header = NSView()
-        header.translatesAutoresizingMaskIntoConstraints = false
-        let title = textLabel(
-            "Apps",
-            size: 12,
-            color: .secondaryLabelColor
-        )
-        header.addSubview(title)
-        NSLayoutConstraint.activate([
-            header.heightAnchor.constraint(equalToConstant: 24),
-            title.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 6),
-            title.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-        ])
-        stack.addArrangedSubview(header)
+        stack.spacing = SwitcherStyle.rowSpacing
+        stack.addArrangedSubview(makeGroupHeader("OTHER APPS"))
 
         for app in windowlessApps {
             let row = makeApplicationRow(app)
@@ -621,6 +755,24 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         return stack
+    }
+
+    private func makeGroupHeader(_ text: String) -> NSView {
+        let header = NSView()
+        header.translatesAutoresizingMaskIntoConstraints = false
+        let label = textLabel(
+            text,
+            size: 10,
+            weight: .semibold,
+            color: .tertiaryLabelColor
+        )
+        header.addSubview(label)
+        NSLayoutConstraint.activate([
+            header.heightAnchor.constraint(equalToConstant: SwitcherStyle.groupHeaderHeight),
+            label.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 10),
+            label.bottomAnchor.constraint(equalTo: header.bottomAnchor, constant: -6),
+        ])
+        return header
     }
 
     private func makeWindowRow(_ window: AeroWindow) -> NSView {
@@ -636,23 +788,42 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         icon.translatesAutoresizingMaskIntoConstraints = false
         icon.imageScaling = .scaleProportionallyUpOrDown
 
-        let title = textLabel(fallbackTitle, size: 13, color: .labelColor)
-        title.lineBreakMode = .byTruncatingTail
-        title.maximumNumberOfLines = 1
+        let appName = textLabel(
+            window.appName,
+            size: 13,
+            weight: .semibold,
+            color: .labelColor
+        )
+        appName.lineBreakMode = .byTruncatingTail
+        appName.maximumNumberOfLines = 1
+        let windowTitle = textLabel(
+            fallbackTitle,
+            size: 11.5,
+            color: .secondaryLabelColor
+        )
+        windowTitle.lineBreakMode = .byTruncatingTail
+        windowTitle.maximumNumberOfLines = 1
+
+        let labels = NSStackView(views: [appName, windowTitle])
+        labels.translatesAutoresizingMaskIntoConstraints = false
+        labels.orientation = .vertical
+        labels.alignment = .leading
+        labels.spacing = 1
 
         row.addSubview(icon)
-        row.addSubview(title)
+        row.addSubview(labels)
 
         NSLayoutConstraint.activate([
-            row.heightAnchor.constraint(equalToConstant: 32),
-            icon.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 6),
+            row.heightAnchor.constraint(equalToConstant: SwitcherStyle.rowHeight),
+            icon.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 10),
             icon.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 18),
-            icon.heightAnchor.constraint(equalToConstant: 18),
-            title.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 9),
-            title.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -8),
-            title.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: SwitcherStyle.iconSize),
+            icon.heightAnchor.constraint(equalToConstant: SwitcherStyle.iconSize),
+            labels.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 11),
+            labels.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
+            labels.centerYAnchor.constraint(equalTo: row.centerYAnchor),
         ])
+        row.registerLabels(primary: appName, secondary: windowTitle)
         itemRows[item.key] = row
         return row
     }
@@ -669,23 +840,39 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         icon.translatesAutoresizingMaskIntoConstraints = false
         icon.imageScaling = .scaleProportionallyUpOrDown
 
-        let title = textLabel(app.appName, size: 13, color: .labelColor)
-        title.lineBreakMode = .byTruncatingTail
-        title.maximumNumberOfLines = 1
+        let appName = textLabel(
+            app.appName,
+            size: 13,
+            weight: .semibold,
+            color: .labelColor
+        )
+        appName.lineBreakMode = .byTruncatingTail
+        appName.maximumNumberOfLines = 1
+        let status = textLabel(
+            "No open windows",
+            size: 11.5,
+            color: .secondaryLabelColor
+        )
+        let labels = NSStackView(views: [appName, status])
+        labels.translatesAutoresizingMaskIntoConstraints = false
+        labels.orientation = .vertical
+        labels.alignment = .leading
+        labels.spacing = 1
 
         row.addSubview(icon)
-        row.addSubview(title)
+        row.addSubview(labels)
 
         NSLayoutConstraint.activate([
-            row.heightAnchor.constraint(equalToConstant: 32),
-            icon.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 6),
+            row.heightAnchor.constraint(equalToConstant: SwitcherStyle.rowHeight),
+            icon.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 10),
             icon.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 18),
-            icon.heightAnchor.constraint(equalToConstant: 18),
-            title.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 9),
-            title.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -8),
-            title.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: SwitcherStyle.iconSize),
+            icon.heightAnchor.constraint(equalToConstant: SwitcherStyle.iconSize),
+            labels.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 11),
+            labels.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
+            labels.centerYAnchor.constraint(equalTo: row.centerYAnchor),
         ])
+        row.registerLabels(primary: appName, secondary: status)
         itemRows[item.key] = row
         return row
     }
@@ -905,7 +1092,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         if !bundleID.isEmpty,
            let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
             let image = NSWorkspace.shared.icon(forFile: appURL.path)
-            image.size = NSSize(width: 18, height: 18)
+            image.size = NSSize(
+                width: SwitcherStyle.iconSize,
+                height: SwitcherStyle.iconSize
+            )
             iconCache[bundleID] = image
             return image
         }
@@ -920,7 +1110,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             return cachedIcon
         }
         if let icon = NSRunningApplication(processIdentifier: app.processIdentifier)?.icon {
-            icon.size = NSSize(width: 18, height: 18)
+            icon.size = NSSize(
+                width: SwitcherStyle.iconSize,
+                height: SwitcherStyle.iconSize
+            )
             iconCache[cacheKey] = icon
             return icon
         }
