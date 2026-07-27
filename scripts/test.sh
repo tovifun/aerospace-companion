@@ -16,7 +16,9 @@ plutil -lint "$root_dir/resources/Info.plist"
 
 grep -q 'loadWindows(presentErrors: false)' \
     "$root_dir/src/window-switcher/main.swift"
-grep -q 'AeroSpaceClient.activate(workspace: window.workspace)' \
+grep -q 'DispatchQueue.global(qos: .userInteractive).async' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'switchingTo: focusedWorkspace == window.workspace' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'pgrep -f "$legacy_binary"' "$root_dir/scripts/install.sh"
 

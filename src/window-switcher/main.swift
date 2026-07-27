@@ -77,17 +77,19 @@ private enum AeroSpaceClient {
         return Int(value)
     }
 
-    static func activate(workspace: String) throws {
-        _ = try run(["workspace", "--", workspace])
-    }
+    static func focus(windowID: Int, switchingTo workspace: String?) {
+        if let workspace {
+            DispatchQueue.global(qos: .userInteractive).async {
+                // Preserve the ordering off the main thread: reveal the
+                // destination workspace before focusing its floating window.
+                _ = try? run(["workspace", "--", workspace])
+                _ = try? run(["focus", "--window-id", String(windowID)])
+            }
+            return
+        }
 
-    static func focus(windowID: Int) throws {
         guard let executable else {
-            throw NSError(
-                domain: "AeroSpaceWindowSwitcher",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "AeroSpace CLI was not found"]
-            )
+            return
         }
 
         let process = Process()
@@ -95,7 +97,7 @@ private enum AeroSpaceClient {
         process.arguments = ["focus", "--window-id", String(windowID)]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        try process.run()
+        try? process.run()
     }
 
     private static func run(_ arguments: [String]) throws -> Data {
@@ -788,14 +790,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             let focusedWorkspace = focusedWindowID.flatMap { focusedID in
                 allWindows.first { $0.windowID == focusedID }?.workspace
             }
-            if focusedWorkspace != window.workspace {
-                // Switch monitors/workspaces before hiding the panel. The
-                // selected floating window can then be focused asynchronously
-                // without flashing on the previously focused monitor.
-                try? AeroSpaceClient.activate(workspace: window.workspace)
-            }
             hideSwitcher()
-            try? AeroSpaceClient.focus(windowID: window.windowID)
+            AeroSpaceClient.focus(
+                windowID: window.windowID,
+                switchingTo: focusedWorkspace == window.workspace
+                    ? nil
+                    : window.workspace
+            )
         case .application(let app):
             hideSwitcher()
             reopenApplication(app)
