@@ -38,6 +38,8 @@ if [ -n "$personal_matches" ]; then
 fi
 
 "$root_dir/scripts/build.sh"
+"$root_dir/build/AeroSpaceWindowSwitcher.app/Contents/MacOS/aerospace-window-switcher" \
+    --self-test-focus-restorer
 codesign --verify --deep --strict "$root_dir/build/AeroSpaceWindowSwitcher.app"
 codesign --verify --strict "$root_dir/build/aerospace-workspace-prompt"
 

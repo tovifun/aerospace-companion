@@ -18,6 +18,8 @@ window of the focused app to another workspace.
   design workspaces.
 - Floating rules for writing tools, utilities, and secondary WeChat/Feishu
   windows.
+- Closing a focused floating window restores the tiled window that was focused
+  before it.
 - Persistent workspaces, dual-monitor assignments, and an arrange mode.
 
 ## Requirements

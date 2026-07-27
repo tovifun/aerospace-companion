@@ -15,6 +15,7 @@ private struct AeroWindow: Decodable {
     let appBundleID: String
     let workspace: String
     let windowTitle: String
+    let windowLayout: String
 
     enum CodingKeys: String, CodingKey {
         case windowID = "window-id"
@@ -22,6 +23,7 @@ private struct AeroWindow: Decodable {
         case appBundleID = "app-bundle-id"
         case workspace
         case windowTitle = "window-title"
+        case windowLayout = "window-layout"
     }
 }
 
@@ -61,7 +63,10 @@ private enum AeroSpaceClient {
     }
 
     static func allWindows() throws -> [AeroWindow] {
-        let format = "%{window-id} %{app-name} %{app-bundle-id} %{workspace} %{window-title}"
+        let format = """
+        %{window-id} %{app-name} %{app-bundle-id} %{workspace} \
+        %{window-title} %{window-layout}
+        """
         let data = try run(["list-windows", "--all", "--json", "--format", format])
         return try JSONDecoder().decode([AeroWindow].self, from: data)
     }
@@ -100,6 +105,23 @@ private enum AeroSpaceClient {
         try? process.run()
     }
 
+    static func makeFocusSubscription(output: Pipe) throws -> Process {
+        guard let executable else {
+            throw NSError(
+                domain: "AeroSpaceWindowSwitcher",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "AeroSpace CLI was not found"]
+            )
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = ["subscribe", "--no-send-initial", "focus-changed"]
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        return process
+    }
+
     private static func run(_ arguments: [String]) throws -> Data {
         guard let executable else {
             throw NSError(
@@ -131,6 +153,246 @@ private enum AeroSpaceClient {
             )
         }
         return data
+    }
+}
+
+private struct AeroFocusChangedEvent: Decodable {
+    let event: String
+    let windowID: Int?
+    let workspace: String
+
+    enum CodingKeys: String, CodingKey {
+        case event = "_event"
+        case windowID = "windowId"
+        case workspace
+    }
+}
+
+private struct FloatingFocus {
+    let windowID: Int
+    let workspace: String
+}
+
+private struct FocusRestoreTransition {
+    let floating: FloatingFocus
+    let fallback: AeroWindow
+    let restoreWindowID: Int?
+}
+
+private struct FloatingFocusTracker {
+    private var focusedFloating: FloatingFocus?
+    private var lastTiledWindowByWorkspace: [String: Int] = [:]
+
+    mutating func seed(focusedWindow: AeroWindow?) {
+        guard let focusedWindow else { return }
+        if focusedWindow.windowLayout == "floating" {
+            focusedFloating = FloatingFocus(
+                windowID: focusedWindow.windowID,
+                workspace: focusedWindow.workspace
+            )
+        } else {
+            lastTiledWindowByWorkspace[focusedWindow.workspace] = focusedWindow.windowID
+        }
+    }
+
+    mutating func observe(focusedWindow: AeroWindow) -> FocusRestoreTransition? {
+        if
+            let floating = focusedFloating,
+            floating.windowID != focusedWindow.windowID
+        {
+            focusedFloating = nil
+            return FocusRestoreTransition(
+                floating: floating,
+                fallback: focusedWindow,
+                restoreWindowID: lastTiledWindowByWorkspace[floating.workspace]
+            )
+        }
+
+        acceptFocusedWindow(focusedWindow)
+        return nil
+    }
+
+    mutating func clearFloatingFocus() {
+        focusedFloating = nil
+    }
+
+    mutating func settle(
+        transition: FocusRestoreTransition,
+        currentWindows: [AeroWindow]
+    ) -> Int? {
+        let floatingStillExists = currentWindows.contains {
+            $0.windowID == transition.floating.windowID
+        }
+        guard !floatingStillExists else {
+            acceptFocusedWindow(transition.fallback)
+            return nil
+        }
+
+        guard
+            let restoreWindowID = transition.restoreWindowID,
+            restoreWindowID != transition.fallback.windowID,
+            let restoreWindow = currentWindows.first(where: {
+                $0.windowID == restoreWindowID
+            }),
+            restoreWindow.workspace == transition.floating.workspace,
+            restoreWindow.windowLayout != "floating"
+        else {
+            acceptFocusedWindow(transition.fallback)
+            return nil
+        }
+
+        return restoreWindowID
+    }
+
+    private mutating func acceptFocusedWindow(_ window: AeroWindow) {
+        if window.windowLayout == "floating" {
+            focusedFloating = FloatingFocus(
+                windowID: window.windowID,
+                workspace: window.workspace
+            )
+        } else {
+            focusedFloating = nil
+            lastTiledWindowByWorkspace[window.workspace] = window.windowID
+        }
+    }
+}
+
+private final class FloatingFocusRestorer {
+    private let queue = DispatchQueue(
+        label: "\(runtimeIdentifier).focus-restorer",
+        qos: .userInitiated
+    )
+    private var tracker = FloatingFocusTracker()
+    private var subscriptionProcess: Process?
+    private var subscriptionPipe: Pipe?
+    private var retryWorkItem: DispatchWorkItem?
+    private var inputBuffer = Data()
+    private var isStopped = false
+
+    func start() {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.seedTracker()
+            self.launchSubscription()
+        }
+    }
+
+    func stop() {
+        queue.sync {
+            isStopped = true
+            retryWorkItem?.cancel()
+            subscriptionPipe?.fileHandleForReading.readabilityHandler = nil
+            if subscriptionProcess?.isRunning == true {
+                subscriptionProcess?.terminate()
+            }
+            subscriptionProcess = nil
+            subscriptionPipe = nil
+        }
+    }
+
+    private func seedTracker() {
+        guard
+            let focusedWindowID = AeroSpaceClient.focusedWindowID(),
+            let windows = try? AeroSpaceClient.allWindows()
+        else {
+            return
+        }
+        tracker.seed(focusedWindow: windows.first { $0.windowID == focusedWindowID })
+    }
+
+    private func launchSubscription() {
+        guard !isStopped, subscriptionProcess == nil else { return }
+
+        let output = Pipe()
+        do {
+            let process = try AeroSpaceClient.makeFocusSubscription(output: output)
+            output.fileHandleForReading.readabilityHandler = { [weak self] handle in
+                let data = handle.availableData
+                guard !data.isEmpty else {
+                    handle.readabilityHandler = nil
+                    return
+                }
+                self?.queue.async { [weak self] in
+                    self?.consume(data)
+                }
+            }
+            process.terminationHandler = { [weak self] terminatedProcess in
+                self?.queue.async { [weak self] in
+                    guard
+                        let self,
+                        self.subscriptionProcess === terminatedProcess
+                    else {
+                        return
+                    }
+                    self.subscriptionPipe?.fileHandleForReading.readabilityHandler = nil
+                    self.subscriptionProcess = nil
+                    self.subscriptionPipe = nil
+                    self.inputBuffer.removeAll(keepingCapacity: true)
+                    self.scheduleRestart()
+                }
+            }
+
+            subscriptionProcess = process
+            subscriptionPipe = output
+            try process.run()
+        } catch {
+            output.fileHandleForReading.readabilityHandler = nil
+            subscriptionProcess = nil
+            subscriptionPipe = nil
+            scheduleRestart()
+        }
+    }
+
+    private func scheduleRestart() {
+        guard !isStopped else { return }
+        retryWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.launchSubscription()
+        }
+        retryWorkItem = workItem
+        queue.asyncAfter(deadline: .now() + 1, execute: workItem)
+    }
+
+    private func consume(_ data: Data) {
+        inputBuffer.append(data)
+        while let newlineIndex = inputBuffer.firstIndex(of: 0x0A) {
+            let line = inputBuffer.subdata(in: inputBuffer.startIndex..<newlineIndex)
+            inputBuffer.removeSubrange(inputBuffer.startIndex...newlineIndex)
+            guard
+                let event = try? JSONDecoder().decode(
+                    AeroFocusChangedEvent.self,
+                    from: line
+                ),
+                event.event == "focus-changed"
+            else {
+                continue
+            }
+            handle(event)
+        }
+    }
+
+    private func handle(_ event: AeroFocusChangedEvent) {
+        guard let windowID = event.windowID else {
+            tracker.clearFloatingFocus()
+            return
+        }
+        guard
+            let windows = try? AeroSpaceClient.allWindows(),
+            let focusedWindow = windows.first(where: { $0.windowID == windowID })
+        else {
+            return
+        }
+        guard
+            let transition = tracker.observe(focusedWindow: focusedWindow),
+            let restoreWindowID = tracker.settle(
+                transition: transition,
+                currentWindows: windows
+            )
+        else {
+            return
+        }
+
+        AeroSpaceClient.focus(windowID: restoreWindowID, switchingTo: nil)
     }
 }
 
@@ -287,6 +549,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var isLoaded = false
     private var isRefreshing = false
     private var loadGeneration = 0
+    private let floatingFocusRestorer = FloatingFocusRestorer()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let invokedByShortcut = CommandLine.arguments.contains("--forward")
@@ -309,6 +572,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         startSignalHandling()
+        floatingFocusRestorer.start()
         writeDaemonPID()
         cycleObserver = DistributedNotificationCenter.default().addObserver(
             forName: cycleNotificationName,
@@ -335,6 +599,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         stopEventMonitoring()
+        floatingFocusRestorer.stop()
         if let cycleObserver {
             DistributedNotificationCenter.default().removeObserver(cycleObserver)
         }
@@ -1020,6 +1285,102 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         label.isSelectable = false
         return label
     }
+}
+
+private func runFloatingFocusTrackerTests() -> Bool {
+    func window(_ id: Int, layout: String, workspace: String = "1") -> AeroWindow {
+        AeroWindow(
+            windowID: id,
+            appName: "Test",
+            appBundleID: "test.app",
+            workspace: workspace,
+            windowTitle: "Window \(id)",
+            windowLayout: layout
+        )
+    }
+
+    let first = window(1, layout: "h_tiles")
+    let second = window(2, layout: "h_tiles")
+    let floating = window(3, layout: "floating")
+
+    var closedFloatingTracker = FloatingFocusTracker()
+    closedFloatingTracker.seed(focusedWindow: second)
+    _ = closedFloatingTracker.observe(focusedWindow: floating)
+    guard
+        let closeTransition = closedFloatingTracker.observe(focusedWindow: first),
+        closedFloatingTracker.settle(
+            transition: closeTransition,
+            currentWindows: [first, second]
+        ) == second.windowID
+    else {
+        return false
+    }
+
+    var manualFocusTracker = FloatingFocusTracker()
+    manualFocusTracker.seed(focusedWindow: second)
+    _ = manualFocusTracker.observe(focusedWindow: floating)
+    guard
+        let manualTransition = manualFocusTracker.observe(focusedWindow: first),
+        manualFocusTracker.settle(
+            transition: manualTransition,
+            currentWindows: [first, second, floating]
+        ) == nil
+    else {
+        return false
+    }
+
+    var workspaceChangeTracker = FloatingFocusTracker()
+    workspaceChangeTracker.seed(focusedWindow: second)
+    _ = workspaceChangeTracker.observe(focusedWindow: floating)
+    let otherWorkspace = window(4, layout: "h_tiles", workspace: "2")
+    guard
+        let workspaceTransition = workspaceChangeTracker.observe(
+            focusedWindow: otherWorkspace
+        ),
+        workspaceChangeTracker.settle(
+            transition: workspaceTransition,
+            currentWindows: [first, second, floating, otherWorkspace]
+        ) == nil
+    else {
+        return false
+    }
+
+    var crossWorkspaceCloseTracker = FloatingFocusTracker()
+    crossWorkspaceCloseTracker.seed(focusedWindow: second)
+    _ = crossWorkspaceCloseTracker.observe(focusedWindow: floating)
+    guard
+        let crossWorkspaceCloseTransition = crossWorkspaceCloseTracker.observe(
+            focusedWindow: otherWorkspace
+        ),
+        crossWorkspaceCloseTracker.settle(
+            transition: crossWorkspaceCloseTransition,
+            currentWindows: [first, second, otherWorkspace]
+        ) == second.windowID
+    else {
+        return false
+    }
+
+    var floatingFallbackTracker = FloatingFocusTracker()
+    floatingFallbackTracker.seed(focusedWindow: second)
+    _ = floatingFallbackTracker.observe(focusedWindow: floating)
+    let otherFloating = window(5, layout: "floating", workspace: "3")
+    guard
+        let floatingFallbackTransition = floatingFallbackTracker.observe(
+            focusedWindow: otherFloating
+        ),
+        floatingFallbackTracker.settle(
+            transition: floatingFallbackTransition,
+            currentWindows: [first, second, otherFloating]
+        ) == second.windowID
+    else {
+        return false
+    }
+
+    return true
+}
+
+if CommandLine.arguments.contains("--self-test-focus-restorer") {
+    exit(runFloatingFocusTrackerTests() ? EXIT_SUCCESS : EXIT_FAILURE)
 }
 
 private let application = NSApplication.shared
