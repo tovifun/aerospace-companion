@@ -177,24 +177,36 @@ fi
 migrate_legacy_install() {
     legacy_root="$HOME/.local/share/aerospace-window-switcher"
     legacy_app="$legacy_root/AeroSpaceWindowSwitcher.app"
+    legacy_binary="$legacy_app/Contents/MacOS/aerospace-window-switcher"
     legacy_pid_file="/tmp/com.tovizhong.aerospace-window-switcher.pid"
+    legacy_pids=
 
     if [ -r "$legacy_pid_file" ]; then
         legacy_pid=$(/bin/cat "$legacy_pid_file" 2>/dev/null || true)
+        legacy_pids=$legacy_pid
+    fi
+
+    if [ -x /usr/bin/pgrep ]; then
+        detected_legacy_pids=$(
+            /usr/bin/pgrep -f "$legacy_binary" 2>/dev/null || true
+        )
+        legacy_pids="$legacy_pids $detected_legacy_pids"
+    fi
+
+    for legacy_pid in $legacy_pids; do
         case "$legacy_pid" in
-            ''|*[!0-9]*) ;;
-            *)
-                legacy_command=$(
-                    /bin/ps -p "$legacy_pid" -o command= 2>/dev/null || true
-                )
-                case "$legacy_command" in
-                    *"$legacy_app/Contents/MacOS/aerospace-window-switcher"*)
-                        /bin/kill "$legacy_pid" 2>/dev/null || true
-                        ;;
-                esac
+            ''|*[!0-9]*) continue ;;
+        esac
+
+        legacy_command=$(
+            /bin/ps -p "$legacy_pid" -o command= 2>/dev/null || true
+        )
+        case "$legacy_command" in
+            *"$legacy_binary"*)
+                /bin/kill "$legacy_pid" 2>/dev/null || true
                 ;;
         esac
-    fi
+    done
 
     case "$legacy_root" in
         "$HOME/.local/share/aerospace-window-switcher")

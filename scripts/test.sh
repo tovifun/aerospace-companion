@@ -18,6 +18,7 @@ grep -q 'loadWindows(presentErrors: false)' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'AeroSpaceClient.activate(workspace: window.workspace)' \
     "$root_dir/src/window-switcher/main.swift"
+grep -q 'pgrep -f "$legacy_binary"' "$root_dir/scripts/install.sh"
 
 personal_matches=$(
     grep -R "/Users/tovizhong\\|com\\.tovizhong" \
