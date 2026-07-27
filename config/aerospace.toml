@@ -37,6 +37,11 @@ on-window-detected = [
 
     # Let AeroSpace classify WeChat and Feishu dialogs natively. App-wide
     # floating rules make regular windows briefly reflow and disturb focus.
+    {
+        if = 'test %{app-bundle-id} = com.tencent.xinWeChat && test %{window-title} = 图片和视频',
+        run = 'layout floating',
+        check-further-callbacks = true,
+    },
 
     # Writing and task apps stay on the current workspace as floating windows.
     { if = 'test %{app-bundle-id} = com.nickustinov.itsypad', run = 'layout floating' },
