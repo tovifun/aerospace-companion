@@ -77,6 +77,10 @@ private enum AeroSpaceClient {
         return Int(value)
     }
 
+    static func activate(workspace: String) throws {
+        _ = try run(["workspace", "--", workspace])
+    }
+
     static func focus(windowID: Int) throws {
         guard let executable else {
             throw NSError(
@@ -779,12 +783,21 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func select(_ item: SwitcherItem) {
-        hideSwitcher()
-
         switch item {
         case .window(let window):
+            let focusedWorkspace = focusedWindowID.flatMap { focusedID in
+                allWindows.first { $0.windowID == focusedID }?.workspace
+            }
+            if focusedWorkspace != window.workspace {
+                // Switch monitors/workspaces before hiding the panel. The
+                // selected floating window can then be focused asynchronously
+                // without flashing on the previously focused monitor.
+                try? AeroSpaceClient.activate(workspace: window.workspace)
+            }
+            hideSwitcher()
             try? AeroSpaceClient.focus(windowID: window.windowID)
         case .application(let app):
+            hideSwitcher()
             reopenApplication(app)
         }
     }

@@ -16,13 +16,17 @@ plutil -lint "$root_dir/resources/Info.plist"
 
 grep -q 'loadWindows(presentErrors: false)' \
     "$root_dir/src/window-switcher/main.swift"
+grep -q 'AeroSpaceClient.activate(workspace: window.workspace)' \
+    "$root_dir/src/window-switcher/main.swift"
 
 personal_matches=$(
     grep -R "/Users/tovizhong\\|com\\.tovizhong" \
         "$root_dir/src" "$root_dir/config" "$root_dir/resources" 2>/dev/null || true
     grep "/Users/tovizhong\\|com\\.tovizhong" \
         "$root_dir/scripts/"* 2>/dev/null |
-        grep -v "$root_dir/scripts/test.sh:" || true
+        grep -v "$root_dir/scripts/test.sh:" |
+        grep -F -v 'legacy_pid_file="/tmp/com.tovizhong.aerospace-window-switcher.pid"' ||
+        true
 )
 if [ -n "$personal_matches" ]; then
     printf '%s\n' "$personal_matches"
@@ -39,6 +43,8 @@ trap 'rm -rf "$test_root"' EXIT
 test_home="$test_root/home"
 mkdir -p "$test_home"
 printf '# original config\n' > "$test_home/.aerospace.toml"
+mkdir -p \
+    "$test_home/.local/share/aerospace-window-switcher/AeroSpaceWindowSwitcher.app"
 
 HOME="$test_home" \
 AEROSPACE_COMPANION_SKIP_LAUNCH=1 \
@@ -51,6 +57,7 @@ test -x "$test_home/.local/bin/aerospace-float-secondary-window"
 test -x "$test_home/.local/bin/aerospace-companion-update"
 test -x "$test_home/.local/bin/aerospace-workspace-prompt"
 test -d "$test_home/.local/share/aerospace-companion/AeroSpaceWindowSwitcher.app"
+test ! -e "$test_home/.local/share/aerospace-window-switcher"
 grep -q '^# AeroSpace Companion configuration' "$test_home/.aerospace.toml"
 if grep -q '__HOME__\\|__TERMINAL_APP__' "$test_home/.aerospace.toml"; then
     printf 'Config placeholders were not rendered.\n' >&2

@@ -174,6 +174,38 @@ fi
     printf 'config_created=%s\n' "$state_config_created"
 } > "$state_file"
 
+migrate_legacy_install() {
+    legacy_root="$HOME/.local/share/aerospace-window-switcher"
+    legacy_app="$legacy_root/AeroSpaceWindowSwitcher.app"
+    legacy_pid_file="/tmp/com.tovizhong.aerospace-window-switcher.pid"
+
+    if [ -r "$legacy_pid_file" ]; then
+        legacy_pid=$(/bin/cat "$legacy_pid_file" 2>/dev/null || true)
+        case "$legacy_pid" in
+            ''|*[!0-9]*) ;;
+            *)
+                legacy_command=$(
+                    /bin/ps -p "$legacy_pid" -o command= 2>/dev/null || true
+                )
+                case "$legacy_command" in
+                    *"$legacy_app/Contents/MacOS/aerospace-window-switcher"*)
+                        /bin/kill "$legacy_pid" 2>/dev/null || true
+                        ;;
+                esac
+                ;;
+        esac
+    fi
+
+    case "$legacy_root" in
+        "$HOME/.local/share/aerospace-window-switcher")
+            rm -rf "$legacy_root"
+            rm -f "$legacy_pid_file"
+            ;;
+    esac
+}
+
+migrate_legacy_install
+
 if [ "${AEROSPACE_COMPANION_SKIP_LAUNCH:-0}" != "1" ]; then
     /usr/bin/open -gj "$app_dest" --args --daemon
 fi
