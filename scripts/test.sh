@@ -19,6 +19,10 @@ grep -q 'DispatchQueue.global(qos: .userInteractive).async' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'switchingTo: focusedWorkspace == window.workspace' \
     "$root_dir/src/window-switcher/main.swift"
+grep -q 'let hasCachedItems = !orderedItems.isEmpty' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'self.warmIconCache()' \
+    "$root_dir/src/window-switcher/main.swift"
 grep -q 'pgrep -f "$legacy_binary"' "$root_dir/scripts/install.sh"
 
 personal_matches=$(

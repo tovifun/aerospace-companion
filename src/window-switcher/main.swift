@@ -360,6 +360,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.focusedWindowID = focusedWindowID
                     self.allWindows = windows
                     self.windowlessApps = self.runningAppsWithoutWindows(excluding: windows)
+                    self.warmIconCache()
                     self.selectedIndex = nil
                     self.orderedItems = self.workspaceGroups()
                         .flatMap(\.windows)
@@ -404,11 +405,17 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         tracksOptionRelease = NSEvent.modifierFlags.contains(.option)
         commitWhenLoaded = !tracksOptionRelease
         focusedApplicationPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        focusedWindowID = nil
+        let hasCachedItems = !orderedItems.isEmpty
+        if !hasCachedItems {
+            focusedWindowID = nil
+        }
         pendingCycleDelta = 0
         selectedIndex = nil
-        isLoaded = !orderedItems.isEmpty
+        isLoaded = hasCachedItems
         showSwitcher()
+        if hasCachedItems {
+            prepareInitialSelection()
+        }
         loadWindows()
     }
 
@@ -918,6 +925,15 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             return icon
         }
         return appIcon(bundleID: app.bundleIdentifier)
+    }
+
+    private func warmIconCache() {
+        for window in allWindows {
+            _ = appIcon(bundleID: window.appBundleID)
+        }
+        for app in windowlessApps {
+            _ = appIcon(for: app)
+        }
     }
 
     private func runningAppsWithoutWindows(excluding windows: [AeroWindow]) -> [RunningApp] {
