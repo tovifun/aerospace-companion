@@ -10,7 +10,6 @@ sh -n "$root_dir/scripts/install.sh"
 sh -n "$root_dir/scripts/install-online.sh"
 sh -n "$root_dir/scripts/uninstall.sh"
 sh -n "$root_dir/scripts/aerospace-window-switcher-trigger"
-zsh -n "$root_dir/scripts/aerospace-float-secondary-window"
 zsh -n "$root_dir/scripts/aerospace-move-focused-app-to-workspace"
 plutil -lint "$root_dir/resources/Info.plist"
 
@@ -38,8 +37,6 @@ if [ -n "$personal_matches" ]; then
 fi
 
 "$root_dir/scripts/build.sh"
-"$root_dir/build/AeroSpaceWindowSwitcher.app/Contents/MacOS/aerospace-window-switcher" \
-    --self-test-focus-restorer
 codesign --verify --deep --strict "$root_dir/build/AeroSpaceWindowSwitcher.app"
 codesign --verify --strict "$root_dir/build/aerospace-workspace-prompt"
 
@@ -58,7 +55,7 @@ AEROSPACE_COMPANION_SKIP_RELOAD=1 \
 
 test -x "$test_home/.local/bin/aerospace-window-switcher-trigger"
 test -x "$test_home/.local/bin/aerospace-move-focused-app-to-workspace"
-test -x "$test_home/.local/bin/aerospace-float-secondary-window"
+test ! -e "$test_home/.local/bin/aerospace-float-secondary-window"
 test -x "$test_home/.local/bin/aerospace-companion-update"
 test -x "$test_home/.local/bin/aerospace-workspace-prompt"
 test -d "$test_home/.local/share/aerospace-companion/AeroSpaceWindowSwitcher.app"

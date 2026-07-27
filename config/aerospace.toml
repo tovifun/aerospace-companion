@@ -35,6 +35,9 @@ on-window-detected = [
     # Feishu media previews run in a separate helper process.
     { if = 'test %{app-bundle-id} = com.electron.lark.helper', run = 'layout floating' },
 
+    # Let AeroSpace classify WeChat and Feishu dialogs natively. App-wide
+    # floating rules make regular windows briefly reflow and disturb focus.
+
     # Writing and task apps stay on the current workspace as floating windows.
     { if = 'test %{app-bundle-id} = com.nickustinov.itsypad', run = 'layout floating' },
     { if = 'test %{app-bundle-id} = com.iconfactory.Tot', run = 'layout floating' },
@@ -54,24 +57,6 @@ on-window-detected = [
     { if = 'test %{app-bundle-id} = net.pornel.ImageOptim', run = 'layout floating' },
     { if = 'test %{app-bundle-id} = com.tencent.Lemon', run = 'layout floating' },
     { if = 'test %{app-bundle-id} = com.oplus.devicespace', run = 'layout floating' },
-
-    # Keep extra WeChat and Feishu windows floating without tiling flicker.
-    {
-        if = 'test %{app-bundle-id} = com.tencent.xinWeChat',
-        check-further-callbacks = true,
-        run = [
-            'layout floating',
-            'exec-and-forget __HOME__/.local/bin/aerospace-float-secondary-window com.tencent.xinWeChat',
-        ],
-    },
-    {
-        if = 'test %{app-bundle-id} = com.electron.lark',
-        check-further-callbacks = true,
-        run = [
-            'layout floating',
-            'exec-and-forget __HOME__/.local/bin/aerospace-float-secondary-window com.electron.lark',
-        ],
-    },
 
     # Workspace 1: development.
     { if = 'test %{app-bundle-id} = com.openai.codex', run = 'move-node-to-workspace 1' },

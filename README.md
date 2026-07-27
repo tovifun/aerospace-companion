@@ -16,10 +16,8 @@ window of the focused app to another workspace.
 - `Option + Shift + M`: move every window of the focused app to workspace 1-9.
 - Automatic app routing for development, browsers, communication, media, and
   design workspaces.
-- Floating rules for writing tools, utilities, and secondary WeChat/Feishu
-  windows.
-- Closing a focused floating window restores the tiled window that was focused
-  before it.
+- Floating rules for writing tools, utilities, and the dedicated Feishu media
+  helper process.
 - Persistent workspaces, dual-monitor assignments, and an arrange mode.
 
 ## Requirements

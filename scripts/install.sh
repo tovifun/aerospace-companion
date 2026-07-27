@@ -68,6 +68,7 @@ if [ -r "$pid_file" ]; then
 fi
 
 mkdir -p "$install_root" "$bin_dir"
+rm -f "$bin_dir/aerospace-float-secondary-window"
 case "$app_dest" in
     "$HOME/.local/share/aerospace-companion/AeroSpaceWindowSwitcher.app")
         rm -rf "$app_dest"
@@ -87,8 +88,6 @@ install -m 755 "$root_dir/scripts/aerospace-window-switcher-trigger" \
     "$bin_dir/aerospace-window-switcher-trigger"
 install -m 755 "$root_dir/scripts/aerospace-move-focused-app-to-workspace" \
     "$bin_dir/aerospace-move-focused-app-to-workspace"
-install -m 755 "$root_dir/scripts/aerospace-float-secondary-window" \
-    "$bin_dir/aerospace-float-secondary-window"
 install -m 755 "$root_dir/scripts/install-online.sh" \
     "$bin_dir/aerospace-companion-update"
 install -m 755 "$root_dir/scripts/uninstall.sh" \
