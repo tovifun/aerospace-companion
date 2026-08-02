@@ -25,6 +25,38 @@ grep -q 'self.warmIconCache()' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'if isRefreshing || orderedItems.isEmpty' \
     "$root_dir/src/window-switcher/main.swift"
+grep -q 'globalMouseMonitor = NSEvent.addGlobalMonitorForEvents' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q '!panel.frame.contains(NSEvent.mouseLocation)' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'CGEvent.tapCreate' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'tracking: .command' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'case kVK_ANSI_W:' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'case kVK_ANSI_Q:' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'run(\["close", "--window-id", String(windowID)\])' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'runningApplication.terminate()' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'case appPID = "app-pid"' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'AXIsProcessTrustedWithOptions' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'CGRequestListenEventAccess' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'PermissionGuideWindowController' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'Privacy_Accessibility' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'Privacy_ListenEvent' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'activateFileViewerSelecting' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'First run: follow the permission guide' \
+    "$root_dir/scripts/install.sh"
 initial_selection_matches=$(grep -c \
     'initialIndex = currentIndex + pendingCycleDelta' \
     "$root_dir/src/window-switcher/main.swift")

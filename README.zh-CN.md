@@ -10,7 +10,11 @@
 
 - `Option + Tab`：按 AeroSpace workspace 分组浏览所有窗口。
 - `Option + Shift + Tab`：反向浏览。
+- AeroSpace 运行时以相同的窗口切换器接管 `Command + Tab`，不再显示 macOS
+  App 切换器（首次使用需要授予辅助功能和输入监控权限）。
 - 鼠标悬停只显示反馈，不改变键盘焦点；点击后切换窗口。
+- 按住 `Command` 浏览时，使用 `Command + W` 关闭选中窗口，或用
+  `Command + Q` 退出选中窗口所属的 App。
 - 显示正在运行但没有窗口的 App，并可重新打开。
 - 局部半透明浮层，自动跟随 macOS 浅色或深色外观。
 - `Option + Shift + M`：将当前 App 的所有窗口移动到 workspace 1-9。
@@ -55,6 +59,17 @@ AEROSPACE_TERMINAL_APP=Kitty ./scripts/install.sh --with-config
 
 不传 `--with-config` 时，本地安装器只更新辅助工具，不替换配置。
 
+### 首次授权
+
+安装完成后会自动打开权限引导。依次为 AeroSpace Window Switcher 开启：
+
+1. **辅助功能**：允许替换系统的 `Command + Tab`。
+2. **输入监控**：允许读取 `Command`、`Shift` 和 `Tab` 按键。
+
+引导窗口会实时显示授权状态。如果输入监控列表中没有本应用，可以点击
+“显示应用”，再使用系统设置列表下方的 `+` 添加；macOS 询问时请选择
+“退出并重新打开”。这些权限只需授予一次，之后重启 AeroSpace 不会重复请求。
+
 ## 更新
 
 首次安装后，使用下面的命令更新到最新版并应用最新配置：
@@ -86,6 +101,8 @@ workspace。
 | `Option + Tab` | 打开按 workspace 分组的窗口切换器 |
 | `Option + Shift + Tab` | 反向切换 |
 | `Option + Shift + M` | 移动当前 App 的全部窗口 |
+| `Command + W` | 切换器打开时关闭选中的窗口 |
+| `Command + Q` | 切换器打开时退出选中窗口所属的 App |
 | `Option + H/J/K/L` | 向左/下/上/右聚焦窗口 |
 | `Option + Shift + H/J/K/L` | 移动当前窗口 |
 | `Option + 1-9` | 切换 workspace |
