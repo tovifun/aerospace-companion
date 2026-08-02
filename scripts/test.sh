@@ -23,7 +23,32 @@ grep -q 'let hasCachedItems = !orderedItems.isEmpty' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'self.warmIconCache()' \
     "$root_dir/src/window-switcher/main.swift"
+grep -q 'if isRefreshing || orderedItems.isEmpty' \
+    "$root_dir/src/window-switcher/main.swift"
+initial_selection_matches=$(grep -c \
+    'initialIndex = currentIndex + pendingCycleDelta' \
+    "$root_dir/src/window-switcher/main.swift")
+test "$initial_selection_matches" -eq 2
+if grep -q 'currentIndex + launchDirection' \
+    "$root_dir/src/window-switcher/main.swift"; then
+    printf 'Initial selection must stay on the currently focused item.\n' >&2
+    exit 1
+fi
+if grep -q 'row.onHover\|onHover?' \
+    "$root_dir/src/window-switcher/main.swift"; then
+    printf 'Mouse hover must not change the keyboard selection.\n' >&2
+    exit 1
+fi
 grep -q 'pgrep -f "$legacy_binary"' "$root_dir/scripts/install.sh"
+grep -q "alt-cmd-shift-h = 'move-workspace-to-monitor left'" \
+    "$root_dir/config/aerospace.toml"
+grep -q "move-workspace-to-monitor --workspace 1 2" \
+    "$root_dir/config/aerospace.toml"
+if grep -q '^\[workspace-to-monitor-force-assignment\]' \
+    "$root_dir/config/aerospace.toml"; then
+    printf 'Force assignment prevents temporary workspace moves.\n' >&2
+    exit 1
+fi
 
 personal_matches=$(
     grep -R "/Users/tovizhong\\|com\\.tovizhong" \

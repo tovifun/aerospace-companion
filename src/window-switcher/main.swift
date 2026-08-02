@@ -11,14 +11,14 @@ private let daemonPIDPath = "\(runtimePathPrefix).pid"
 
 private enum SwitcherStyle {
     static let surfaceCornerRadius: CGFloat = 18
-    static let rowCornerRadius: CGFloat = 12
+    static let rowCornerRadius: CGFloat = 10
     static let shadowMargin: CGFloat = 24
-    static let contentPadding: CGFloat = 12
-    static let groupSpacing: CGFloat = 10
-    static let groupHeaderHeight: CGFloat = 27
-    static let rowSpacing: CGFloat = 3
-    static let rowHeight: CGFloat = 50
-    static let iconSize: CGFloat = 28
+    static let contentPadding: CGFloat = 10
+    static let groupSpacing: CGFloat = 7
+    static let groupHeaderHeight: CGFloat = 24
+    static let rowSpacing: CGFloat = 1
+    static let rowHeight: CGFloat = 44
+    static let iconSize: CGFloat = 32
     static let accentColor = NSColor(
         srgbRed: 0.20,
         green: 0.43,
@@ -262,7 +262,6 @@ private final class GlassTintView: NSView {
 
 private final class ActionRow: NSControl {
     var onClick: (() -> Void)?
-    var onHover: (() -> Void)?
     var normalColor = NSColor.clear {
         didSet { updateAppearance() }
     }
@@ -306,7 +305,6 @@ private final class ActionRow: NSControl {
 
     override func mouseEntered(with event: NSEvent) {
         isHovered = true
-        onHover?()
         updateAppearance()
     }
 
@@ -316,7 +314,7 @@ private final class ActionRow: NSControl {
     }
 
     override func mouseDown(with event: NSEvent) {
-        setBackgroundColor(SwitcherStyle.accentColor.withAlphaComponent(0.78))
+        setBackgroundColor(SwitcherStyle.accentColor.withAlphaComponent(0.24))
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -332,7 +330,7 @@ private final class ActionRow: NSControl {
         return true
     }
 
-    func registerLabels(primary: NSTextField, secondary: NSTextField) {
+    func registerLabels(primary: NSTextField, secondary: NSTextField? = nil) {
         primaryLabel = primary
         secondaryLabel = secondary
         updateAppearance()
@@ -342,9 +340,9 @@ private final class ActionRow: NSControl {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             let color: NSColor
             if isSelected {
-                color = SwitcherStyle.accentColor
-                primaryLabel?.textColor = .white
-                secondaryLabel?.textColor = NSColor.white.withAlphaComponent(0.76)
+                color = SwitcherStyle.accentColor.withAlphaComponent(0.18)
+                primaryLabel?.textColor = .labelColor
+                secondaryLabel?.textColor = .secondaryLabelColor
             } else if isHovered {
                 color = NSColor.labelColor.withAlphaComponent(0.065)
                 primaryLabel?.textColor = .labelColor
@@ -502,8 +500,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleCycleRequest(direction: Int) {
         if panel?.isVisible == true {
-            if isRefreshing && !orderedItems.isEmpty {
+            if isRefreshing {
                 pendingCycleDelta += direction
+                return
             }
             moveSelection(by: direction)
             return
@@ -513,17 +512,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         tracksOptionRelease = NSEvent.modifierFlags.contains(.option)
         commitWhenLoaded = !tracksOptionRelease
         focusedApplicationPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        focusedWindowID = nil
         let hasCachedItems = !orderedItems.isEmpty
-        if !hasCachedItems {
-            focusedWindowID = nil
-        }
         pendingCycleDelta = 0
         selectedIndex = nil
         isLoaded = hasCachedItems
         showSwitcher()
-        if hasCachedItems {
-            prepareInitialSelection()
-        }
         loadWindows()
     }
 
@@ -782,48 +776,34 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         row.setAccessibilityLabel("\(window.appName), \(fallbackTitle)")
         let item = SwitcherItem.window(window)
         row.onClick = { [weak self] in self?.select(item) }
-        row.onHover = { [weak self] in self?.selectRow(itemKey: item.key) }
 
         let icon = NSImageView(image: appIcon(bundleID: window.appBundleID))
         icon.translatesAutoresizingMaskIntoConstraints = false
         icon.imageScaling = .scaleProportionallyUpOrDown
 
-        let appName = textLabel(
-            window.appName,
-            size: 13,
-            weight: .semibold,
-            color: .labelColor
-        )
-        appName.lineBreakMode = .byTruncatingTail
-        appName.maximumNumberOfLines = 1
         let windowTitle = textLabel(
             fallbackTitle,
-            size: 11.5,
-            color: .secondaryLabelColor
+            size: 15,
+            weight: .medium,
+            color: .labelColor
         )
         windowTitle.lineBreakMode = .byTruncatingTail
         windowTitle.maximumNumberOfLines = 1
 
-        let labels = NSStackView(views: [appName, windowTitle])
-        labels.translatesAutoresizingMaskIntoConstraints = false
-        labels.orientation = .vertical
-        labels.alignment = .leading
-        labels.spacing = 1
-
         row.addSubview(icon)
-        row.addSubview(labels)
+        row.addSubview(windowTitle)
 
         NSLayoutConstraint.activate([
             row.heightAnchor.constraint(equalToConstant: SwitcherStyle.rowHeight),
-            icon.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 10),
+            icon.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 9),
             icon.centerYAnchor.constraint(equalTo: row.centerYAnchor),
             icon.widthAnchor.constraint(equalToConstant: SwitcherStyle.iconSize),
             icon.heightAnchor.constraint(equalToConstant: SwitcherStyle.iconSize),
-            labels.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 11),
-            labels.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
-            labels.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            windowTitle.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 10),
+            windowTitle.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
+            windowTitle.centerYAnchor.constraint(equalTo: row.centerYAnchor),
         ])
-        row.registerLabels(primary: appName, secondary: windowTitle)
+        row.registerLabels(primary: windowTitle)
         itemRows[item.key] = row
         return row
     }
@@ -834,7 +814,6 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         row.setAccessibilityLabel(app.appName)
         let item = SwitcherItem.application(app)
         row.onClick = { [weak self] in self?.select(item) }
-        row.onHover = { [weak self] in self?.selectRow(itemKey: item.key) }
 
         let icon = NSImageView(image: appIcon(for: app))
         icon.translatesAutoresizingMaskIntoConstraints = false
@@ -842,37 +821,27 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let appName = textLabel(
             app.appName,
-            size: 13,
-            weight: .semibold,
+            size: 15,
+            weight: .medium,
             color: .labelColor
         )
         appName.lineBreakMode = .byTruncatingTail
         appName.maximumNumberOfLines = 1
-        let status = textLabel(
-            "No open windows",
-            size: 11.5,
-            color: .secondaryLabelColor
-        )
-        let labels = NSStackView(views: [appName, status])
-        labels.translatesAutoresizingMaskIntoConstraints = false
-        labels.orientation = .vertical
-        labels.alignment = .leading
-        labels.spacing = 1
 
         row.addSubview(icon)
-        row.addSubview(labels)
+        row.addSubview(appName)
 
         NSLayoutConstraint.activate([
             row.heightAnchor.constraint(equalToConstant: SwitcherStyle.rowHeight),
-            icon.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 10),
+            icon.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 9),
             icon.centerYAnchor.constraint(equalTo: row.centerYAnchor),
             icon.widthAnchor.constraint(equalToConstant: SwitcherStyle.iconSize),
             icon.heightAnchor.constraint(equalToConstant: SwitcherStyle.iconSize),
-            labels.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 11),
-            labels.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
-            labels.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            appName.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 10),
+            appName.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
+            appName.centerYAnchor.constraint(equalTo: row.centerYAnchor),
         ])
-        row.registerLabels(primary: appName, secondary: status)
+        row.registerLabels(primary: appName)
         itemRows[item.key] = row
         return row
     }
@@ -903,13 +872,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                guard case .window(let window) = $0 else { return false }
                return window.windowID == focusedWindowID
            }) {
-            initialIndex = currentIndex + launchDirection + pendingCycleDelta
+            initialIndex = currentIndex + pendingCycleDelta
         } else if let focusedApplicationPID,
                   let currentIndex = orderedItems.firstIndex(where: {
                       guard case .application(let app) = $0 else { return false }
                       return app.processIdentifier == focusedApplicationPID
                   }) {
-            initialIndex = currentIndex + launchDirection + pendingCycleDelta
+            initialIndex = currentIndex + pendingCycleDelta
         } else {
             let firstIndex = launchDirection > 0 ? 0 : orderedItems.count - 1
             initialIndex = firstIndex + pendingCycleDelta
@@ -949,18 +918,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func selectRow(itemKey: String) {
-        guard let index = orderedItems.firstIndex(where: { $0.key == itemKey }) else {
-            return
-        }
-        setSelectedIndex(index)
-    }
-
     private func handleModifierFlags(_ flags: NSEvent.ModifierFlags) {
         guard tracksOptionRelease, !flags.contains(.option) else { return }
         tracksOptionRelease = false
 
-        if orderedItems.isEmpty {
+        if isRefreshing || orderedItems.isEmpty {
             commitWhenLoaded = true
         } else {
             commitSelectedWindow()

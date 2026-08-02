@@ -10,7 +10,7 @@ window of the focused app to another workspace.
 
 - `Option + Tab`: browse windows grouped by AeroSpace workspace.
 - `Option + Shift + Tab`: browse in reverse.
-- Mouse hover and click selection.
+- Mouse hover feedback without changing the keyboard selection; click to switch.
 - Running apps without windows are included and can be reopened.
 - Compact translucent panel that follows the macOS light or dark appearance.
 - `Option + Shift + M`: move every window of the focused app to workspace 1-9.

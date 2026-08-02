@@ -10,7 +10,7 @@
 
 - `Option + Tab`：按 AeroSpace workspace 分组浏览所有窗口。
 - `Option + Shift + Tab`：反向浏览。
-- 支持键盘、鼠标悬停和点击选择。
+- 鼠标悬停只显示反馈，不改变键盘焦点；点击后切换窗口。
 - 显示正在运行但没有窗口的 App，并可重新打开。
 - 局部半透明浮层，自动跟随 macOS 浅色或深色外观。
 - `Option + Shift + M`：将当前 App 的所有窗口移动到 workspace 1-9。
