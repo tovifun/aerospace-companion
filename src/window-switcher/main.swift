@@ -17,6 +17,8 @@ private func localized(_ english: String, _ chinese: String) -> String {
 }
 
 private enum SwitcherStyle {
+    static let maximumPanelHeight: CGFloat = 960
+    static let panelScreenInset: CGFloat = 16
     static let surfaceCornerRadius: CGFloat = 18
     static let rowCornerRadius: CGFloat = 8
     static let shadowMargin: CGFloat = 24
@@ -665,6 +667,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var globalModifierMonitor: Any?
     private var localMouseMonitor: Any?
     private var globalMouseMonitor: Any?
+    private var localScrollMonitor: Any?
+    private weak var switcherScrollView: NSScrollView?
     private var cycleObserver: NSObjectProtocol?
     private var forwardSignalSource: DispatchSourceSignal?
     private var reverseSignalSource: DispatchSourceSignal?
@@ -938,6 +942,23 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.dismiss()
             }
         }
+        localScrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) {
+            [weak self] event in
+            guard
+                let self,
+                let panel = self.panel,
+                panel.isVisible,
+                event.window === panel,
+                let scrollView = self.switcherScrollView
+            else {
+                return event
+            }
+
+            // Deliver the wheel event directly. The borderless switcher panel can
+            // otherwise leave it on a child row instead of reaching NSScrollView.
+            scrollView.scrollWheel(with: event)
+            return nil
+        }
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
         NSAnimationContext.runAnimationGroup { context in
@@ -981,6 +1002,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
         scrollView.scrollerStyle = .overlay
+        scrollView.verticalScrollElasticity = .automatic
+        switcherScrollView = scrollView
 
         let documentView = FlippedView()
         documentView.translatesAutoresizingMaskIntoConstraints = false
@@ -1075,7 +1098,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             + CGFloat(max(0, groupCount - 1)) * SwitcherStyle.groupSpacing
         let visibleFrame = screen.visibleFrame
         let width = min(588, max(360, visibleFrame.width - 48))
-        let maximumHeight = min(700, max(144, visibleFrame.height - 48))
+        let maximumHeight = min(
+            SwitcherStyle.maximumPanelHeight,
+            max(176, visibleFrame.height - SwitcherStyle.panelScreenInset * 2)
+        )
         let surfaceChromeHeight = SwitcherStyle.contentPadding * 2
         let height = min(
             max(
@@ -1163,6 +1189,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         windowTitle.lineBreakMode = .byTruncatingTail
         windowTitle.maximumNumberOfLines = 1
+        windowTitle.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         row.addSubview(icon)
         row.addSubview(windowTitle)
@@ -1201,6 +1228,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         appName.lineBreakMode = .byTruncatingTail
         appName.maximumNumberOfLines = 1
+        appName.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         row.addSubview(icon)
         row.addSubview(appName)
@@ -1534,6 +1562,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         panel?.orderOut(nil)
         panel = nil
         targetScreen = nil
+        switcherScrollView = nil
         itemRows.removeAll()
         stopEventMonitoring()
     }
@@ -1554,6 +1583,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         if let globalMouseMonitor {
             NSEvent.removeMonitor(globalMouseMonitor)
             self.globalMouseMonitor = nil
+        }
+        if let localScrollMonitor {
+            NSEvent.removeMonitor(localScrollMonitor)
+            self.localScrollMonitor = nil
         }
     }
 

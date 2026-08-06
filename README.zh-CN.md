@@ -90,9 +90,9 @@ AEROSPACE_TERMINAL_APP=Kitty ./scripts/install.sh --with-config
 | `4` | 媒体 | Music、网易云音乐、汽水音乐、VLC、哔哩哔哩、抖音、TV |
 | `5` | 设计 | Figma、Eagle、RightFont、OBS、Screen Studio、Audacity |
 
-Workspace 1-2 优先放在主显示器，3-9 优先放在内置显示器；没有内置屏幕时
-自动回退到主显示器。写作和任务应用不绑定 workspace，默认悬浮在当前
-workspace。
+Workspace 1-3 固定分配到扩展显示器，4-10 固定分配到主显示器。拔掉扩展
+显示器后，1-3 会临时汇总到主显示器；重新连接后会自动回到扩展显示器。
+写作和任务应用不绑定 workspace，默认悬浮在当前 workspace。
 
 ## 常用快捷键
 

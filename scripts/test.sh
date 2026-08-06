@@ -29,6 +29,12 @@ grep -q 'globalMouseMonitor = NSEvent.addGlobalMonitorForEvents' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q '!panel.frame.contains(NSEvent.mouseLocation)' \
     "$root_dir/src/window-switcher/main.swift"
+grep -q 'maximumPanelHeight: CGFloat = 960' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'localScrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel)' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'scrollView.scrollWheel(with: event)' \
+    "$root_dir/src/window-switcher/main.swift"
 grep -q 'CGEvent.tapCreate' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'tracking: .command' \
@@ -72,13 +78,19 @@ if grep -q 'row.onHover\|onHover?' \
     exit 1
 fi
 grep -q 'pgrep -f "$legacy_binary"' "$root_dir/scripts/install.sh"
-grep -q "alt-cmd-shift-h = 'move-workspace-to-monitor left'" \
+grep -q '^\[workspace-to-monitor-force-assignment\]' \
     "$root_dir/config/aerospace.toml"
-grep -q "move-workspace-to-monitor --workspace 1 2" \
+grep -q "1 = 'secondary'" \
     "$root_dir/config/aerospace.toml"
-if grep -q '^\[workspace-to-monitor-force-assignment\]' \
+grep -q "3 = 'secondary'" \
+    "$root_dir/config/aerospace.toml"
+grep -q "4 = 'main'" \
+    "$root_dir/config/aerospace.toml"
+grep -q "10 = 'main'" \
+    "$root_dir/config/aerospace.toml"
+if grep -q 'move-workspace-to-monitor' \
     "$root_dir/config/aerospace.toml"; then
-    printf 'Force assignment prevents temporary workspace moves.\n' >&2
+    printf 'Force-assigned workspaces cannot be moved between monitors.\n' >&2
     exit 1
 fi
 

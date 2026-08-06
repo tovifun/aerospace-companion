@@ -97,9 +97,11 @@ Updates back up the current config before replacing it.
 | `4` | Media | Music, NetEase Music, Soda Music, VLC, Bilibili, Douyin, TV |
 | `5` | Design | Figma, Eagle, RightFont, OBS, Screen Studio, Audacity |
 
-Workspaces 1-2 prefer the main display. Workspaces 3-9 prefer the built-in
-display and fall back to the main display. Writing and task apps stay on the
-current workspace as floating windows.
+Workspaces 1-3 are assigned to the secondary display and workspaces 4-10 to
+the main display. If the secondary display is disconnected, its workspaces
+temporarily move to the main display and automatically return when it is
+reconnected. Writing and task apps stay on the current workspace as floating
+windows.
 
 ## Key Bindings
 
