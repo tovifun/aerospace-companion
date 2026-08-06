@@ -1,4 +1,5 @@
 import Cocoa
+import ApplicationServices
 import Carbon
 import Darwin
 import QuartzCore
@@ -8,17 +9,25 @@ private let runtimePathPrefix = "/tmp/\(runtimeIdentifier).\(getuid())"
 private let cycleNotificationName = Notification.Name("\(runtimeIdentifier).cycle")
 private let singletonLockPath = "\(runtimePathPrefix).lock"
 private let daemonPIDPath = "\(runtimePathPrefix).pid"
+private let commandTabStatusPath = "\(runtimePathPrefix).command-tab-status"
+
+private func localized(_ english: String, _ chinese: String) -> String {
+    let preferredLanguage = Locale.preferredLanguages.first ?? "en"
+    return preferredLanguage.hasPrefix("zh") ? chinese : english
+}
 
 private enum SwitcherStyle {
+    static let maximumPanelHeight: CGFloat = 960
+    static let panelScreenInset: CGFloat = 16
     static let surfaceCornerRadius: CGFloat = 18
-    static let rowCornerRadius: CGFloat = 12
+    static let rowCornerRadius: CGFloat = 8
     static let shadowMargin: CGFloat = 24
-    static let contentPadding: CGFloat = 12
-    static let groupSpacing: CGFloat = 10
-    static let groupHeaderHeight: CGFloat = 27
-    static let rowSpacing: CGFloat = 3
-    static let rowHeight: CGFloat = 50
-    static let iconSize: CGFloat = 28
+    static let contentPadding: CGFloat = 8
+    static let groupSpacing: CGFloat = 4
+    static let groupHeaderHeight: CGFloat = 21
+    static let rowSpacing: CGFloat = 0
+    static let rowHeight: CGFloat = 38
+    static let iconSize: CGFloat = 32
     static let accentColor = NSColor(
         srgbRed: 0.20,
         green: 0.43,
@@ -31,6 +40,7 @@ private struct AeroWindow: Decodable {
     let windowID: Int
     let appName: String
     let appBundleID: String
+    let appPID: pid_t
     let workspace: String
     let windowTitle: String
 
@@ -38,6 +48,7 @@ private struct AeroWindow: Decodable {
         case windowID = "window-id"
         case appName = "app-name"
         case appBundleID = "app-bundle-id"
+        case appPID = "app-pid"
         case workspace
         case windowTitle = "window-title"
     }
@@ -79,7 +90,7 @@ private enum AeroSpaceClient {
     }
 
     static func allWindows() throws -> [AeroWindow] {
-        let format = "%{window-id} %{app-name} %{app-bundle-id} %{workspace} %{window-title}"
+        let format = "%{window-id} %{app-name} %{app-bundle-id} %{app-pid} %{workspace} %{window-title}"
         let data = try run(["list-windows", "--all", "--json", "--format", format])
         return try JSONDecoder().decode([AeroWindow].self, from: data)
     }
@@ -116,6 +127,17 @@ private enum AeroSpaceClient {
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try? process.run()
+    }
+
+    static func close(windowID: Int, completion: @escaping (Error?) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                _ = try run(["close", "--window-id", String(windowID)])
+                DispatchQueue.main.async { completion(nil) }
+            } catch {
+                DispatchQueue.main.async { completion(error) }
+            }
+        }
     }
 
     private static func run(_ arguments: [String]) throws -> Data {
@@ -262,7 +284,6 @@ private final class GlassTintView: NSView {
 
 private final class ActionRow: NSControl {
     var onClick: (() -> Void)?
-    var onHover: (() -> Void)?
     var normalColor = NSColor.clear {
         didSet { updateAppearance() }
     }
@@ -306,7 +327,6 @@ private final class ActionRow: NSControl {
 
     override func mouseEntered(with event: NSEvent) {
         isHovered = true
-        onHover?()
         updateAppearance()
     }
 
@@ -316,7 +336,7 @@ private final class ActionRow: NSControl {
     }
 
     override func mouseDown(with event: NSEvent) {
-        setBackgroundColor(SwitcherStyle.accentColor.withAlphaComponent(0.78))
+        setBackgroundColor(SwitcherStyle.accentColor.withAlphaComponent(0.24))
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -332,7 +352,7 @@ private final class ActionRow: NSControl {
         return true
     }
 
-    func registerLabels(primary: NSTextField, secondary: NSTextField) {
+    func registerLabels(primary: NSTextField, secondary: NSTextField? = nil) {
         primaryLabel = primary
         secondaryLabel = secondary
         updateAppearance()
@@ -342,9 +362,9 @@ private final class ActionRow: NSControl {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             let color: NSColor
             if isSelected {
-                color = SwitcherStyle.accentColor
-                primaryLabel?.textColor = .white
-                secondaryLabel?.textColor = NSColor.white.withAlphaComponent(0.76)
+                color = SwitcherStyle.accentColor.withAlphaComponent(0.18)
+                primaryLabel?.textColor = .labelColor
+                secondaryLabel?.textColor = .secondaryLabelColor
             } else if isHovered {
                 color = NSColor.labelColor.withAlphaComponent(0.065)
                 primaryLabel?.textColor = .labelColor
@@ -371,13 +391,293 @@ private final class ActionRow: NSControl {
     }
 }
 
+private final class PermissionGuideWindowController: NSWindowController {
+    var onRequestAccessibility: (() -> Void)?
+    var onRequestInputMonitoring: (() -> Void)?
+    var onRevealApplication: (() -> Void)?
+    var onRestartApplication: (() -> Void)?
+
+    private let summaryLabel = NSTextField(labelWithString: "")
+    private let accessibilityStatusLabel = NSTextField(labelWithString: "")
+    private let inputMonitoringStatusLabel = NSTextField(labelWithString: "")
+    private let accessibilityButton = NSButton(
+        title: localized("Open Settings", "打开设置"),
+        target: nil,
+        action: nil
+    )
+    private let inputMonitoringButton = NSButton(
+        title: localized("Open Settings", "打开设置"),
+        target: nil,
+        action: nil
+    )
+    private let restartButton = NSButton(
+        title: localized("Restart Switcher", "重新启动切换器"),
+        target: nil,
+        action: nil
+    )
+
+    init() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 370),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = localized("Set Up Command + Tab", "设置 Command + Tab")
+        window.isReleasedWhenClosed = false
+        window.center()
+        super.init(window: window)
+        buildContent()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func update(
+        accessibilityTrusted: Bool,
+        listenAccess: Bool,
+        eventTapCreated: Bool
+    ) {
+        updateStatusLabel(accessibilityStatusLabel, isAllowed: accessibilityTrusted)
+        updateStatusLabel(inputMonitoringStatusLabel, isAllowed: listenAccess)
+        accessibilityButton.isEnabled = !accessibilityTrusted
+        inputMonitoringButton.isEnabled = !listenAccess
+
+        if eventTapCreated {
+            summaryLabel.stringValue = localized(
+                "Setup is complete. AeroSpace Window Switcher now handles Command + Tab.",
+                "设置完成，Command + Tab 已由 AeroSpace Window Switcher 接管。"
+            )
+            summaryLabel.textColor = .systemGreen
+            restartButton.isHidden = true
+        } else if accessibilityTrusted && listenAccess {
+            summaryLabel.stringValue = localized(
+                "Permissions are enabled. Restart the switcher to apply them.",
+                "权限已经开启，需要重新启动切换器后生效。"
+            )
+            summaryLabel.textColor = .systemOrange
+            restartButton.isHidden = false
+        } else {
+            summaryLabel.stringValue = localized(
+                "Complete both settings to enable it automatically. AeroSpace does not need to restart.",
+                "完成下面两项设置后会自动启用，不需要重启 AeroSpace。"
+            )
+            summaryLabel.textColor = .secondaryLabelColor
+            restartButton.isHidden = true
+        }
+    }
+
+    private func buildContent() {
+        guard let contentView = window?.contentView else { return }
+
+        let title = NSTextField(labelWithString: localized(
+            "Use Command + Tab to Switch Windows",
+            "让 Command + Tab 切换窗口"
+        ))
+        title.font = .systemFont(ofSize: 20, weight: .semibold)
+
+        let description = NSTextField(wrappingLabelWithString: localized(
+            "Two one-time macOS permissions are required to replace the system app switcher.",
+            "为了隐藏 macOS 自带的 App 切换器并监听快捷键，需要一次性授予两项系统权限。"
+        ))
+        description.textColor = .secondaryLabelColor
+        description.font = .systemFont(ofSize: 13)
+
+        summaryLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        summaryLabel.maximumNumberOfLines = 2
+        summaryLabel.lineBreakMode = .byWordWrapping
+
+        accessibilityButton.target = self
+        accessibilityButton.action = #selector(requestAccessibility)
+        accessibilityButton.bezelStyle = .rounded
+        let accessibilityRow = makePermissionRow(
+            title: localized("Accessibility", "辅助功能"),
+            detail: localized(
+                "Replaces the system Command + Tab switcher.",
+                "允许切换器拦截并替换系统 Command + Tab。"
+            ),
+            statusLabel: accessibilityStatusLabel,
+            button: accessibilityButton
+        )
+
+        inputMonitoringButton.target = self
+        inputMonitoringButton.action = #selector(requestInputMonitoring)
+        inputMonitoringButton.bezelStyle = .rounded
+        let inputMonitoringRow = makePermissionRow(
+            title: localized("Input Monitoring", "输入监控"),
+            detail: localized(
+                "Reads Command, Shift, and Tab key presses.",
+                "允许切换器读取 Command、Shift 和 Tab 按键。"
+            ),
+            statusLabel: inputMonitoringStatusLabel,
+            button: inputMonitoringButton
+        )
+
+        let help = NSTextField(wrappingLabelWithString: localized(
+            "If the app is missing from Input Monitoring, reveal it and add it with the + button. Choose Quit & Reopen when macOS asks.",
+            "如果“输入监控”列表里没有本应用，请点“显示应用”，再用列表下方的 + 添加。系统询问时请选择“退出并重新打开”。"
+        ))
+        help.textColor = .tertiaryLabelColor
+        help.font = .systemFont(ofSize: 11)
+
+        let revealButton = NSButton(
+            title: localized("Reveal App", "显示应用"),
+            target: self,
+            action: #selector(revealApplication)
+        )
+        revealButton.bezelStyle = .rounded
+        restartButton.target = self
+        restartButton.action = #selector(restartApplication)
+        restartButton.bezelStyle = .rounded
+        restartButton.keyEquivalent = "\r"
+        restartButton.isHidden = true
+
+        let laterButton = NSButton(
+            title: localized("Later", "稍后"),
+            target: self,
+            action: #selector(closeGuide)
+        )
+        laterButton.bezelStyle = .rounded
+
+        let buttons = NSStackView(views: [revealButton, restartButton, laterButton])
+        buttons.orientation = .horizontal
+        buttons.alignment = .centerY
+        buttons.spacing = 8
+
+        let content = NSStackView(views: [
+            title,
+            description,
+            summaryLabel,
+            accessibilityRow,
+            inputMonitoringRow,
+            help,
+            buttons,
+        ])
+        content.translatesAutoresizingMaskIntoConstraints = false
+        content.orientation = .vertical
+        content.alignment = .leading
+        content.spacing = 12
+        content.setCustomSpacing(5, after: title)
+        content.setCustomSpacing(8, after: description)
+        content.setCustomSpacing(7, after: accessibilityRow)
+        content.setCustomSpacing(10, after: inputMonitoringRow)
+        contentView.addSubview(content)
+
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
+            content.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
+            content.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 22),
+            content.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -20),
+            accessibilityRow.widthAnchor.constraint(equalTo: content.widthAnchor),
+            inputMonitoringRow.widthAnchor.constraint(equalTo: content.widthAnchor),
+            description.widthAnchor.constraint(equalTo: content.widthAnchor),
+            summaryLabel.widthAnchor.constraint(equalTo: content.widthAnchor),
+            help.widthAnchor.constraint(equalTo: content.widthAnchor),
+            buttons.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+        ])
+    }
+
+    private func makePermissionRow(
+        title: String,
+        detail: String,
+        statusLabel: NSTextField,
+        button: NSButton
+    ) -> NSView {
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.wantsLayer = true
+        container.layer?.cornerRadius = 9
+        container.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+        let detailLabel = NSTextField(labelWithString: detail)
+        detailLabel.font = .systemFont(ofSize: 11)
+        detailLabel.textColor = .secondaryLabelColor
+        let labels = NSStackView(views: [titleLabel, detailLabel])
+        labels.translatesAutoresizingMaskIntoConstraints = false
+        labels.orientation = .vertical
+        labels.alignment = .leading
+        labels.spacing = 2
+
+        statusLabel.translatesAutoresizingMaskIntoConstraints = false
+        statusLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(labels)
+        container.addSubview(statusLabel)
+        container.addSubview(button)
+
+        NSLayoutConstraint.activate([
+            container.heightAnchor.constraint(equalToConstant: 58),
+            labels.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            labels.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            statusLabel.leadingAnchor.constraint(greaterThanOrEqualTo: labels.trailingAnchor, constant: 8),
+            statusLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            button.leadingAnchor.constraint(equalTo: statusLabel.trailingAnchor, constant: 10),
+            button.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
+            button.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            button.widthAnchor.constraint(equalToConstant: 84),
+        ])
+        return container
+    }
+
+    private func updateStatusLabel(_ label: NSTextField, isAllowed: Bool) {
+        label.stringValue = isAllowed
+            ? localized("✓ Allowed", "✓ 已允许")
+            : localized("Not Set", "待设置")
+        label.textColor = isAllowed ? .systemGreen : .systemOrange
+    }
+
+    @objc private func requestAccessibility() {
+        onRequestAccessibility?()
+    }
+
+    @objc private func requestInputMonitoring() {
+        onRequestInputMonitoring?()
+    }
+
+    @objc private func revealApplication() {
+        onRevealApplication?()
+    }
+
+    @objc private func restartApplication() {
+        onRestartApplication?()
+    }
+
+    @objc private func closeGuide() {
+        close()
+    }
+}
+
 private final class AppDelegate: NSObject, NSApplicationDelegate {
+    private static let commandTabEventCallback: CGEventTapCallBack = {
+        _, type, event, userInfo in
+        guard let userInfo else {
+            return Unmanaged.passUnretained(event)
+        }
+        let delegate = Unmanaged<AppDelegate>
+            .fromOpaque(userInfo)
+            .takeUnretainedValue()
+        return delegate.handleCommandTabEvent(type: type, event: event)
+    }
+
     private var panel: SwitcherPanel?
     private var localEventMonitor: Any?
     private var globalModifierMonitor: Any?
+    private var localMouseMonitor: Any?
+    private var globalMouseMonitor: Any?
+    private var localScrollMonitor: Any?
+    private weak var switcherScrollView: NSScrollView?
     private var cycleObserver: NSObjectProtocol?
     private var forwardSignalSource: DispatchSourceSignal?
     private var reverseSignalSource: DispatchSourceSignal?
+    private var commandTabEventTap: CFMachPort?
+    private var commandTabRunLoopSource: CFRunLoopSource?
+    private var commandTabRetryTimer: Timer?
+    private var permissionGuide: PermissionGuideWindowController?
+    private var didPresentPermissionGuide = false
+    private var permissionGuideCompletion: DispatchWorkItem?
     private var targetScreen: NSScreen?
     private var iconCache: [String: NSImage] = [:]
     private var allWindows: [AeroWindow] = []
@@ -389,7 +689,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var focusedApplicationPID: pid_t?
     private var pendingCycleDelta = 0
     private var commitWhenLoaded = false
-    private var tracksOptionRelease = false
+    private var trackedReleaseModifier: NSEvent.ModifierFlags?
     private var launchDirection = 1
     private var singletonLockFileDescriptor: Int32 = -1
     private var isLoaded = false
@@ -400,8 +700,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         let invokedByShortcut = CommandLine.arguments.contains("--forward")
             || CommandLine.arguments.contains("--reverse")
         launchDirection = CommandLine.arguments.contains("--reverse") ? -1 : 1
-        tracksOptionRelease = NSEvent.modifierFlags.contains(.option)
-        commitWhenLoaded = invokedByShortcut && !tracksOptionRelease
+        trackedReleaseModifier = NSEvent.modifierFlags.contains(.option) ? .option : nil
+        commitWhenLoaded = invokedByShortcut && trackedReleaseModifier == nil
         focusedApplicationPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         NSApp.setActivationPolicy(.accessory)
 
@@ -417,6 +717,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         startSignalHandling()
+        startCommandTabInterception()
         writeDaemonPID()
         cycleObserver = DistributedNotificationCenter.default().addObserver(
             forName: cycleNotificationName,
@@ -427,9 +728,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.handleCycleRequest(direction: direction)
         }
 
+        let presentedPermissionGuide = presentPermissionGuideIfNeeded()
         if CommandLine.arguments.contains("--daemon") {
             // AeroSpace may not have created its socket yet during login or installation.
             // Keep the daemon responsive so the first shortcut can retry the load.
+            loadWindows(presentErrors: false)
+            return
+        }
+        if presentedPermissionGuide && !invokedByShortcut {
             loadWindows(presentErrors: false)
             return
         }
@@ -443,6 +749,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         stopEventMonitoring()
+        stopCommandTabInterception()
+        permissionGuideCompletion?.cancel()
         if let cycleObserver {
             DistributedNotificationCenter.default().removeObserver(cycleObserver)
         }
@@ -455,7 +763,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func loadWindows(presentErrors: Bool = true) {
+    private func loadWindows(
+        presentErrors: Bool = true,
+        preserveSelection: Bool = false,
+        fallbackSelectionIndex: Int? = nil
+    ) {
         loadGeneration += 1
         let generation = loadGeneration
         isRefreshing = true
@@ -465,6 +777,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                 let windows = try AeroSpaceClient.allWindows()
                 DispatchQueue.main.async {
                     guard let self, self.loadGeneration == generation else { return }
+                    let previousSelectionKey = preserveSelection
+                        ? self.selectedItem?.key
+                        : nil
                     self.focusedWindowID = focusedWindowID
                     self.allWindows = windows
                     self.windowlessApps = self.runningAppsWithoutWindows(excluding: windows)
@@ -483,7 +798,16 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                         return
                     }
                     self.refreshContent()
-                    self.prepareInitialSelection()
+                    if preserveSelection {
+                        let preservedIndex = previousSelectionKey.flatMap { key in
+                            self.orderedItems.firstIndex { $0.key == key }
+                        } ?? fallbackSelectionIndex ?? 0
+                        let pendingDelta = self.pendingCycleDelta
+                        self.pendingCycleDelta = 0
+                        self.setSelectedIndex(preservedIndex + pendingDelta)
+                    } else {
+                        self.prepareInitialSelection()
+                    }
                     if self.commitWhenLoaded {
                         self.commitSelectedWindow()
                     }
@@ -500,30 +824,35 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func handleCycleRequest(direction: Int) {
+    private func handleCycleRequest(
+        direction: Int,
+        tracking modifier: NSEvent.ModifierFlags = .option,
+        modifierIsPressed: Bool? = nil
+    ) {
+        let isPressed = modifierIsPressed ?? NSEvent.modifierFlags.contains(modifier)
+        trackedReleaseModifier = isPressed ? modifier : nil
+        if isPressed {
+            commitWhenLoaded = false
+        }
+
         if panel?.isVisible == true {
-            if isRefreshing && !orderedItems.isEmpty {
+            if isRefreshing {
                 pendingCycleDelta += direction
+                return
             }
             moveSelection(by: direction)
             return
         }
 
         launchDirection = direction
-        tracksOptionRelease = NSEvent.modifierFlags.contains(.option)
-        commitWhenLoaded = !tracksOptionRelease
+        commitWhenLoaded = !isPressed
         focusedApplicationPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        focusedWindowID = nil
         let hasCachedItems = !orderedItems.isEmpty
-        if !hasCachedItems {
-            focusedWindowID = nil
-        }
         pendingCycleDelta = 0
         selectedIndex = nil
         isLoaded = hasCachedItems
         showSwitcher()
-        if hasCachedItems {
-            prepareInitialSelection()
-        }
         loadWindows()
     }
 
@@ -553,8 +882,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] event in
             if event.type == .flagsChanged {
                 self?.handleModifierFlags(event.modifierFlags)
+            } else if self?.handleCommandSelectionShortcut(event) == true {
+                return nil
             } else if event.keyCode == 53 {
-                self?.tracksOptionRelease = false
+                self?.trackedReleaseModifier = nil
                 self?.dismiss()
                 return nil
             } else if event.keyCode == 36 {
@@ -569,6 +900,64 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 self?.handleModifierFlags(event.modifierFlags)
             }
+        }
+        let mouseDownEvents: NSEvent.EventTypeMask = [
+            .leftMouseDown,
+            .rightMouseDown,
+            .otherMouseDown,
+        ]
+        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: mouseDownEvents) {
+            [weak self] event in
+            guard
+                let self,
+                let panel = self.panel,
+                event.window === panel,
+                let contentView = panel.contentView
+            else {
+                return event
+            }
+
+            let contentFrame = contentView.bounds.insetBy(
+                dx: SwitcherStyle.shadowMargin,
+                dy: SwitcherStyle.shadowMargin
+            )
+            guard !contentFrame.contains(event.locationInWindow) else {
+                return event
+            }
+
+            self.dismiss()
+            return nil
+        }
+        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: mouseDownEvents) {
+            [weak self] _ in
+            DispatchQueue.main.async {
+                guard
+                    let self,
+                    let panel = self.panel,
+                    panel.isVisible,
+                    !panel.frame.contains(NSEvent.mouseLocation)
+                else {
+                    return
+                }
+                self.dismiss()
+            }
+        }
+        localScrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) {
+            [weak self] event in
+            guard
+                let self,
+                let panel = self.panel,
+                panel.isVisible,
+                event.window === panel,
+                let scrollView = self.switcherScrollView
+            else {
+                return event
+            }
+
+            // Deliver the wheel event directly. The borderless switcher panel can
+            // otherwise leave it on a child row instead of reaching NSScrollView.
+            scrollView.scrollWheel(with: event)
+            return nil
         }
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
@@ -613,6 +1002,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
         scrollView.scrollerStyle = .overlay
+        scrollView.verticalScrollElasticity = .automatic
+        switcherScrollView = scrollView
 
         let documentView = FlippedView()
         documentView.translatesAutoresizingMaskIntoConstraints = false
@@ -707,7 +1098,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             + CGFloat(max(0, groupCount - 1)) * SwitcherStyle.groupSpacing
         let visibleFrame = screen.visibleFrame
         let width = min(588, max(360, visibleFrame.width - 48))
-        let maximumHeight = min(700, max(144, visibleFrame.height - 48))
+        let maximumHeight = min(
+            SwitcherStyle.maximumPanelHeight,
+            max(176, visibleFrame.height - SwitcherStyle.panelScreenInset * 2)
+        )
         let surfaceChromeHeight = SwitcherStyle.contentPadding * 2
         let height = min(
             max(
@@ -782,48 +1176,35 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         row.setAccessibilityLabel("\(window.appName), \(fallbackTitle)")
         let item = SwitcherItem.window(window)
         row.onClick = { [weak self] in self?.select(item) }
-        row.onHover = { [weak self] in self?.selectRow(itemKey: item.key) }
 
         let icon = NSImageView(image: appIcon(bundleID: window.appBundleID))
         icon.translatesAutoresizingMaskIntoConstraints = false
         icon.imageScaling = .scaleProportionallyUpOrDown
 
-        let appName = textLabel(
-            window.appName,
-            size: 13,
-            weight: .semibold,
-            color: .labelColor
-        )
-        appName.lineBreakMode = .byTruncatingTail
-        appName.maximumNumberOfLines = 1
         let windowTitle = textLabel(
             fallbackTitle,
-            size: 11.5,
-            color: .secondaryLabelColor
+            size: 15,
+            weight: .medium,
+            color: .labelColor
         )
         windowTitle.lineBreakMode = .byTruncatingTail
         windowTitle.maximumNumberOfLines = 1
-
-        let labels = NSStackView(views: [appName, windowTitle])
-        labels.translatesAutoresizingMaskIntoConstraints = false
-        labels.orientation = .vertical
-        labels.alignment = .leading
-        labels.spacing = 1
+        windowTitle.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         row.addSubview(icon)
-        row.addSubview(labels)
+        row.addSubview(windowTitle)
 
         NSLayoutConstraint.activate([
             row.heightAnchor.constraint(equalToConstant: SwitcherStyle.rowHeight),
-            icon.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 10),
+            icon.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 9),
             icon.centerYAnchor.constraint(equalTo: row.centerYAnchor),
             icon.widthAnchor.constraint(equalToConstant: SwitcherStyle.iconSize),
             icon.heightAnchor.constraint(equalToConstant: SwitcherStyle.iconSize),
-            labels.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 11),
-            labels.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
-            labels.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            windowTitle.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 10),
+            windowTitle.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
+            windowTitle.centerYAnchor.constraint(equalTo: row.centerYAnchor),
         ])
-        row.registerLabels(primary: appName, secondary: windowTitle)
+        row.registerLabels(primary: windowTitle)
         itemRows[item.key] = row
         return row
     }
@@ -834,7 +1215,6 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         row.setAccessibilityLabel(app.appName)
         let item = SwitcherItem.application(app)
         row.onClick = { [weak self] in self?.select(item) }
-        row.onHover = { [weak self] in self?.selectRow(itemKey: item.key) }
 
         let icon = NSImageView(image: appIcon(for: app))
         icon.translatesAutoresizingMaskIntoConstraints = false
@@ -842,37 +1222,28 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let appName = textLabel(
             app.appName,
-            size: 13,
-            weight: .semibold,
+            size: 15,
+            weight: .medium,
             color: .labelColor
         )
         appName.lineBreakMode = .byTruncatingTail
         appName.maximumNumberOfLines = 1
-        let status = textLabel(
-            "No open windows",
-            size: 11.5,
-            color: .secondaryLabelColor
-        )
-        let labels = NSStackView(views: [appName, status])
-        labels.translatesAutoresizingMaskIntoConstraints = false
-        labels.orientation = .vertical
-        labels.alignment = .leading
-        labels.spacing = 1
+        appName.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         row.addSubview(icon)
-        row.addSubview(labels)
+        row.addSubview(appName)
 
         NSLayoutConstraint.activate([
             row.heightAnchor.constraint(equalToConstant: SwitcherStyle.rowHeight),
-            icon.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 10),
+            icon.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 9),
             icon.centerYAnchor.constraint(equalTo: row.centerYAnchor),
             icon.widthAnchor.constraint(equalToConstant: SwitcherStyle.iconSize),
             icon.heightAnchor.constraint(equalToConstant: SwitcherStyle.iconSize),
-            labels.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 11),
-            labels.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
-            labels.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            appName.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 10),
+            appName.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
+            appName.centerYAnchor.constraint(equalTo: row.centerYAnchor),
         ])
-        row.registerLabels(primary: appName, secondary: status)
+        row.registerLabels(primary: appName)
         itemRows[item.key] = row
         return row
     }
@@ -903,13 +1274,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                guard case .window(let window) = $0 else { return false }
                return window.windowID == focusedWindowID
            }) {
-            initialIndex = currentIndex + launchDirection + pendingCycleDelta
+            initialIndex = currentIndex + pendingCycleDelta
         } else if let focusedApplicationPID,
                   let currentIndex = orderedItems.firstIndex(where: {
                       guard case .application(let app) = $0 else { return false }
                       return app.processIdentifier == focusedApplicationPID
                   }) {
-            initialIndex = currentIndex + launchDirection + pendingCycleDelta
+            initialIndex = currentIndex + pendingCycleDelta
         } else {
             let firstIndex = launchDirection > 0 ? 0 : orderedItems.count - 1
             initialIndex = firstIndex + pendingCycleDelta
@@ -949,18 +1320,16 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func selectRow(itemKey: String) {
-        guard let index = orderedItems.firstIndex(where: { $0.key == itemKey }) else {
+    private func handleModifierFlags(_ flags: NSEvent.ModifierFlags) {
+        guard
+            let trackedReleaseModifier,
+            !flags.contains(trackedReleaseModifier)
+        else {
             return
         }
-        setSelectedIndex(index)
-    }
+        self.trackedReleaseModifier = nil
 
-    private func handleModifierFlags(_ flags: NSEvent.ModifierFlags) {
-        guard tracksOptionRelease, !flags.contains(.option) else { return }
-        tracksOptionRelease = false
-
-        if orderedItems.isEmpty {
+        if isRefreshing || orderedItems.isEmpty {
             commitWhenLoaded = true
         } else {
             commitSelectedWindow()
@@ -976,6 +1345,138 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         select(orderedItems[selectedIndex])
+    }
+
+    private var selectedItem: SwitcherItem? {
+        guard
+            let selectedIndex,
+            orderedItems.indices.contains(selectedIndex)
+        else {
+            return nil
+        }
+        return orderedItems[selectedIndex]
+    }
+
+    private func handleCommandSelectionShortcut(_ event: NSEvent) -> Bool {
+        guard
+            event.type == .keyDown,
+            trackedReleaseModifier == .command,
+            event.modifierFlags.contains(.command),
+            event.modifierFlags.intersection([.option, .control, .shift]).isEmpty
+        else {
+            return false
+        }
+
+        switch Int(event.keyCode) {
+        case kVK_ANSI_W:
+            if !event.isARepeat {
+                closeSelectedWindow()
+            }
+            return true
+        case kVK_ANSI_Q:
+            if !event.isARepeat {
+                quitSelectedApplication()
+            }
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func closeSelectedWindow() {
+        guard
+            let selectedIndex,
+            orderedItems.indices.contains(selectedIndex),
+            case .window(let window) = orderedItems[selectedIndex]
+        else {
+            NSSound.beep()
+            return
+        }
+
+        allWindows.removeAll { $0.windowID == window.windowID }
+        rebuildItemsAfterSelectionAction(
+            removingApplicationPID: nil,
+            fallbackSelectionIndex: selectedIndex
+        )
+        AeroSpaceClient.close(windowID: window.windowID) { [weak self] error in
+            guard let self else { return }
+            if let error {
+                self.showTransientActionError(error.localizedDescription)
+            }
+            self.loadWindows(
+                presentErrors: false,
+                preserveSelection: true,
+                fallbackSelectionIndex: selectedIndex
+            )
+        }
+    }
+
+    private func quitSelectedApplication() {
+        guard
+            let selectedIndex,
+            orderedItems.indices.contains(selectedIndex)
+        else {
+            return
+        }
+
+        let processIdentifier: pid_t
+        switch orderedItems[selectedIndex] {
+        case .window(let window):
+            processIdentifier = window.appPID
+        case .application(let app):
+            processIdentifier = app.processIdentifier
+        }
+        guard
+            processIdentifier != ProcessInfo.processInfo.processIdentifier,
+            let runningApplication = NSRunningApplication(
+                processIdentifier: processIdentifier
+            )
+        else {
+            NSSound.beep()
+            return
+        }
+
+        guard runningApplication.terminate() else {
+            NSSound.beep()
+            return
+        }
+        allWindows.removeAll { $0.appPID == processIdentifier }
+        rebuildItemsAfterSelectionAction(
+            removingApplicationPID: processIdentifier,
+            fallbackSelectionIndex: selectedIndex
+        )
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            self?.loadWindows(
+                presentErrors: false,
+                preserveSelection: true,
+                fallbackSelectionIndex: selectedIndex
+            )
+        }
+    }
+
+    private func rebuildItemsAfterSelectionAction(
+        removingApplicationPID: pid_t?,
+        fallbackSelectionIndex: Int
+    ) {
+        windowlessApps = runningAppsWithoutWindows(excluding: allWindows).filter {
+            $0.processIdentifier != removingApplicationPID
+        }
+        orderedItems = workspaceGroups()
+            .flatMap(\.windows)
+            .map(SwitcherItem.window)
+            + windowlessApps.map(SwitcherItem.application)
+
+        guard !orderedItems.isEmpty else {
+            dismiss()
+            return
+        }
+        refreshContent()
+        setSelectedIndex(min(fallbackSelectionIndex, orderedItems.count - 1))
+    }
+
+    private func showTransientActionError(_ message: String) {
+        NSSound.beep()
+        NSLog("AeroSpace Window Switcher action failed: %@", message)
     }
 
     private func select(_ item: SwitcherItem) {
@@ -1052,7 +1553,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func hideSwitcher() {
-        tracksOptionRelease = false
+        trackedReleaseModifier = nil
         commitWhenLoaded = false
         pendingCycleDelta = 0
         selectedIndex = nil
@@ -1061,6 +1562,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         panel?.orderOut(nil)
         panel = nil
         targetScreen = nil
+        switcherScrollView = nil
         itemRows.removeAll()
         stopEventMonitoring()
     }
@@ -1073,6 +1575,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         if let globalModifierMonitor {
             NSEvent.removeMonitor(globalModifierMonitor)
             self.globalModifierMonitor = nil
+        }
+        if let localMouseMonitor {
+            NSEvent.removeMonitor(localMouseMonitor)
+            self.localMouseMonitor = nil
+        }
+        if let globalMouseMonitor {
+            NSEvent.removeMonitor(globalMouseMonitor)
+            self.globalMouseMonitor = nil
+        }
+        if let localScrollMonitor {
+            NSEvent.removeMonitor(localScrollMonitor)
+            self.localScrollMonitor = nil
         }
     }
 
@@ -1182,6 +1696,264 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         reverseSource.resume()
         reverseSignalSource = reverseSource
+    }
+
+    private func startCommandTabInterception() {
+        guard commandTabEventTap == nil else { return }
+
+        let isTrusted = AXIsProcessTrusted()
+        let hasListenAccess = CGPreflightListenEventAccess()
+
+        guard isTrusted, hasListenAccess else {
+            writeCommandTabStatus(
+                accessibilityTrusted: isTrusted,
+                listenAccess: hasListenAccess,
+                eventTapCreated: false
+            )
+            updatePermissionGuide(
+                accessibilityTrusted: isTrusted,
+                listenAccess: hasListenAccess,
+                eventTapCreated: false
+            )
+            scheduleCommandTabInterceptionRetry()
+            return
+        }
+
+        let eventMask = (CGEventMask(1) << CGEventType.keyDown.rawValue)
+            | (CGEventMask(1) << CGEventType.keyUp.rawValue)
+        guard let eventTap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: eventMask,
+            callback: Self.commandTabEventCallback,
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        ) else {
+            writeCommandTabStatus(
+                accessibilityTrusted: true,
+                listenAccess: hasListenAccess,
+                eventTapCreated: false
+            )
+            updatePermissionGuide(
+                accessibilityTrusted: true,
+                listenAccess: hasListenAccess,
+                eventTapCreated: false
+            )
+            scheduleCommandTabInterceptionRetry()
+            return
+        }
+
+        let runLoopSource = CFMachPortCreateRunLoopSource(
+            kCFAllocatorDefault,
+            eventTap,
+            0
+        )
+        commandTabEventTap = eventTap
+        commandTabRunLoopSource = runLoopSource
+        commandTabRetryTimer?.invalidate()
+        commandTabRetryTimer = nil
+        CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+        CGEvent.tapEnable(tap: eventTap, enable: true)
+        writeCommandTabStatus(
+            accessibilityTrusted: true,
+            listenAccess: hasListenAccess,
+            eventTapCreated: true
+        )
+        updatePermissionGuide(
+            accessibilityTrusted: true,
+            listenAccess: hasListenAccess,
+            eventTapCreated: true
+        )
+    }
+
+    private func scheduleCommandTabInterceptionRetry() {
+        guard commandTabRetryTimer == nil else { return }
+        commandTabRetryTimer = Timer.scheduledTimer(
+            withTimeInterval: 1,
+            repeats: true
+        ) { [weak self] _ in
+            self?.startCommandTabInterception()
+        }
+    }
+
+    @discardableResult
+    private func presentPermissionGuideIfNeeded() -> Bool {
+        let accessibilityTrusted = AXIsProcessTrusted()
+        let listenAccess = CGPreflightListenEventAccess()
+        guard !accessibilityTrusted || !listenAccess else { return false }
+        guard !didPresentPermissionGuide else { return true }
+        didPresentPermissionGuide = true
+
+        let guide = PermissionGuideWindowController()
+        guide.onRequestAccessibility = { [weak self] in
+            self?.requestAccessibilityPermission()
+        }
+        guide.onRequestInputMonitoring = { [weak self] in
+            self?.requestInputMonitoringPermission()
+        }
+        guide.onRevealApplication = {
+            NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
+        }
+        guide.onRestartApplication = { [weak self] in
+            self?.restartAsDaemon()
+        }
+        permissionGuide = guide
+        guide.update(
+            accessibilityTrusted: accessibilityTrusted,
+            listenAccess: listenAccess,
+            eventTapCreated: commandTabEventTap != nil
+        )
+        guide.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        return true
+    }
+
+    private func updatePermissionGuide(
+        accessibilityTrusted: Bool,
+        listenAccess: Bool,
+        eventTapCreated: Bool
+    ) {
+        guard let permissionGuide else { return }
+        permissionGuide.update(
+            accessibilityTrusted: accessibilityTrusted,
+            listenAccess: listenAccess,
+            eventTapCreated: eventTapCreated
+        )
+        guard eventTapCreated else {
+            permissionGuideCompletion?.cancel()
+            permissionGuideCompletion = nil
+            return
+        }
+
+        let completion = DispatchWorkItem { [weak self, weak permissionGuide] in
+            permissionGuide?.close()
+            self?.permissionGuideCompletion = nil
+        }
+        permissionGuideCompletion?.cancel()
+        permissionGuideCompletion = completion
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: completion)
+    }
+
+    private func requestAccessibilityPermission() {
+        let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+        _ = AXIsProcessTrustedWithOptions([promptKey: true] as CFDictionary)
+        openPrivacySettings(pane: "Privacy_Accessibility")
+    }
+
+    private func requestInputMonitoringPermission() {
+        _ = CGRequestListenEventAccess()
+        openPrivacySettings(pane: "Privacy_ListenEvent")
+    }
+
+    private func openPrivacySettings(pane: String) {
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.preference.security?\(pane)"
+        ) else {
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func restartAsDaemon() {
+        let relaunch = Process()
+        relaunch.executableURL = URL(fileURLWithPath: "/bin/sh")
+        relaunch.arguments = [
+            "-c",
+            "sleep 0.6; exec /usr/bin/open -gj \"$1\" --args --daemon",
+            "aerospace-companion-relaunch",
+            Bundle.main.bundlePath,
+        ]
+        relaunch.standardOutput = FileHandle.nullDevice
+        relaunch.standardError = FileHandle.nullDevice
+        do {
+            try relaunch.run()
+            NSApp.terminate(nil)
+        } catch {
+            showError(localized(
+                "Unable to restart the switcher: \(error.localizedDescription)",
+                "无法重新启动切换器：\(error.localizedDescription)"
+            ))
+        }
+    }
+
+    private func stopCommandTabInterception() {
+        commandTabRetryTimer?.invalidate()
+        commandTabRetryTimer = nil
+        if let commandTabRunLoopSource {
+            CFRunLoopRemoveSource(
+                CFRunLoopGetMain(),
+                commandTabRunLoopSource,
+                .commonModes
+            )
+            self.commandTabRunLoopSource = nil
+        }
+        if let commandTabEventTap {
+            CFMachPortInvalidate(commandTabEventTap)
+            self.commandTabEventTap = nil
+        }
+    }
+
+    private func handleCommandTabEvent(
+        type: CGEventType,
+        event: CGEvent
+    ) -> Unmanaged<CGEvent>? {
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            if let commandTabEventTap {
+                CGEvent.tapEnable(tap: commandTabEventTap, enable: true)
+            }
+            return Unmanaged.passUnretained(event)
+        }
+
+        guard
+            isAeroSpaceRunning(),
+            event.getIntegerValueField(.keyboardEventKeycode) == Int64(kVK_Tab)
+        else {
+            return Unmanaged.passUnretained(event)
+        }
+
+        let flags = event.flags
+        guard
+            flags.contains(.maskCommand),
+            !flags.contains(.maskAlternate),
+            !flags.contains(.maskControl)
+        else {
+            return Unmanaged.passUnretained(event)
+        }
+
+        if type == .keyDown {
+            let direction = flags.contains(.maskShift) ? -1 : 1
+            DispatchQueue.main.async { [weak self] in
+                self?.handleCycleRequest(
+                    direction: direction,
+                    tracking: .command,
+                    modifierIsPressed: true
+                )
+            }
+        }
+        return nil
+    }
+
+    private func isAeroSpaceRunning() -> Bool {
+        return NSWorkspace.shared.runningApplications.contains { application in
+            application.bundleIdentifier == "bobko.aerospace"
+                || application.localizedName == "AeroSpace"
+                || application.bundleURL?.lastPathComponent == "AeroSpace.app"
+        }
+    }
+
+    private func writeCommandTabStatus(
+        accessibilityTrusted: Bool,
+        listenAccess: Bool,
+        eventTapCreated: Bool
+    ) {
+        let status = "accessibility_trusted=\(accessibilityTrusted)\n"
+            + "listen_access=\(listenAccess)\n"
+            + "event_tap_created=\(eventTapCreated)\n"
+        try? status.write(
+            toFile: commandTabStatusPath,
+            atomically: true,
+            encoding: .utf8
+        )
     }
 
     private func writeDaemonPID() {

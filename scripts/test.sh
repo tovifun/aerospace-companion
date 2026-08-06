@@ -23,7 +23,76 @@ grep -q 'let hasCachedItems = !orderedItems.isEmpty' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'self.warmIconCache()' \
     "$root_dir/src/window-switcher/main.swift"
+grep -q 'if isRefreshing || orderedItems.isEmpty' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'globalMouseMonitor = NSEvent.addGlobalMonitorForEvents' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q '!panel.frame.contains(NSEvent.mouseLocation)' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'maximumPanelHeight: CGFloat = 960' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'localScrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel)' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'scrollView.scrollWheel(with: event)' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'CGEvent.tapCreate' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'tracking: .command' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'case kVK_ANSI_W:' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'case kVK_ANSI_Q:' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'run(\["close", "--window-id", String(windowID)\])' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'runningApplication.terminate()' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'case appPID = "app-pid"' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'AXIsProcessTrustedWithOptions' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'CGRequestListenEventAccess' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'PermissionGuideWindowController' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'Privacy_Accessibility' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'Privacy_ListenEvent' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'activateFileViewerSelecting' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'First run: follow the permission guide' \
+    "$root_dir/scripts/install.sh"
+initial_selection_matches=$(grep -c \
+    'initialIndex = currentIndex + pendingCycleDelta' \
+    "$root_dir/src/window-switcher/main.swift")
+test "$initial_selection_matches" -eq 2
+if grep -q 'currentIndex + launchDirection' \
+    "$root_dir/src/window-switcher/main.swift"; then
+    printf 'Initial selection must stay on the currently focused item.\n' >&2
+    exit 1
+fi
+if grep -q 'row.onHover\|onHover?' \
+    "$root_dir/src/window-switcher/main.swift"; then
+    printf 'Mouse hover must not change the keyboard selection.\n' >&2
+    exit 1
+fi
 grep -q 'pgrep -f "$legacy_binary"' "$root_dir/scripts/install.sh"
+grep -q '^\[workspace-to-monitor-force-assignment\]' \
+    "$root_dir/config/aerospace.toml"
+grep -q "1 = 'secondary'" \
+    "$root_dir/config/aerospace.toml"
+grep -q "3 = 'secondary'" \
+    "$root_dir/config/aerospace.toml"
+grep -q "4 = 'main'" \
+    "$root_dir/config/aerospace.toml"
+grep -q "10 = 'main'" \
+    "$root_dir/config/aerospace.toml"
+if grep -q 'move-workspace-to-monitor' \
+    "$root_dir/config/aerospace.toml"; then
+    printf 'Force-assigned workspaces cannot be moved between monitors.\n' >&2
+    exit 1
+fi
 
 personal_matches=$(
     grep -R "/Users/tovizhong\\|com\\.tovizhong" \

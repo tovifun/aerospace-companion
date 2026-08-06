@@ -36,6 +36,7 @@ cp "$root_dir/resources/Info.plist" "$app/Contents/Info.plist"
 xcrun swiftc \
     -O \
     -target "$arch-apple-macos13.0" \
+    -framework ApplicationServices \
     -framework Cocoa \
     -framework Carbon \
     -framework QuartzCore \
@@ -49,7 +50,9 @@ xcrun swiftc \
     "$root_dir/src/workspace-prompt/main.swift" \
     -o "$build_dir/aerospace-workspace-prompt"
 
-codesign --force --deep --sign - "$app"
+codesign --force --deep --sign - \
+    --requirements '=designated => identifier "io.github.tovifun.aerospace-companion.window-switcher"' \
+    "$app"
 codesign --force --sign - "$build_dir/aerospace-workspace-prompt"
 
 printf 'Built %s\n' "$app"

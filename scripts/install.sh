@@ -42,11 +42,13 @@ runtime_id=io.github.tovifun.aerospace-companion.window-switcher
 pid_file="/tmp/$runtime_id.$(/usr/bin/id -u).pid"
 app_dest="$install_root/AeroSpaceWindowSwitcher.app"
 state_file="$install_root/install-state"
+first_install=1
 previous_config_path=
 previous_config_backup=
 previous_config_created=0
 
 if [ -f "$state_file" ]; then
+    first_install=0
     previous_config_path=$(sed -n 's/^config_path=//p' "$state_file")
     previous_config_backup=$(sed -n 's/^config_backup=//p' "$state_file")
     previous_config_created=$(sed -n 's/^config_created=//p' "$state_file")
@@ -223,6 +225,10 @@ fi
 
 printf '\nAeroSpace Companion installed.\n'
 printf 'Tools:  %s\n' "$install_root"
+if [ "$first_install" -eq 1 ] && \
+   [ "${AEROSPACE_COMPANION_SKIP_LAUNCH:-0}" != "1" ]; then
+    printf 'First run: follow the permission guide for Accessibility and Input Monitoring.\n'
+fi
 if [ "$with_config" -eq 1 ]; then
     printf 'Config: %s\n' "$config_path"
     if [ -n "$config_backup" ]; then
