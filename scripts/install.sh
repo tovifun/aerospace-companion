@@ -39,7 +39,8 @@ fi
 "$root_dir/scripts/build.sh"
 
 runtime_id=io.github.tovifun.aerospace-companion.window-switcher
-pid_file="/tmp/$runtime_id.$(/usr/bin/id -u).pid"
+runtime_dir="$install_root/runtime"
+pid_file="$runtime_dir/$runtime_id.$(/usr/bin/id -u).pid"
 app_dest="$install_root/AeroSpaceWindowSwitcher.app"
 state_file="$install_root/install-state"
 first_install=1
@@ -69,7 +70,7 @@ if [ -r "$pid_file" ]; then
     esac
 fi
 
-mkdir -p "$install_root" "$bin_dir"
+mkdir -p "$install_root" "$bin_dir" "$runtime_dir"
 rm -f "$bin_dir/aerospace-float-secondary-window"
 case "$app_dest" in
     "$HOME/.local/share/aerospace-companion/AeroSpaceWindowSwitcher.app")

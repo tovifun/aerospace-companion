@@ -72,11 +72,28 @@ if grep -q 'currentIndex + launchDirection' \
     printf 'Initial selection must stay on the currently focused item.\n' >&2
     exit 1
 fi
-if grep -q 'row.onHover\|onHover?' \
-    "$root_dir/src/window-switcher/main.swift"; then
-    printf 'Mouse hover must not change the keyboard selection.\n' >&2
-    exit 1
-fi
+grep -q 'static let hoveredItemActionPriorityKey = "hoveredItemActionPriority"' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'row.onHoverChanged = ' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'let target = commandActionTarget' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'DispatchSource.makeSignalSource(signal: SIGURG, queue: .main)' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'prepareWorkspacePrompt()' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'workspaceList.orientation = .vertical' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'section.widthAnchor.constraint(equalTo: workspaceList.widthAnchor)' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'windowRow.widthAnchor.constraint(equalTo: section.widthAnchor)' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'self.updateWorkspacePromptIfVisible()' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q '"● current workspace   → focused window   · windows to move' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q '/bin/kill -URG "$pid"' \
+    "$root_dir/scripts/aerospace-move-focused-app-to-workspace"
 grep -q 'pgrep -f "$legacy_binary"' "$root_dir/scripts/install.sh"
 grep -q '^\[workspace-to-monitor-force-assignment\]' \
     "$root_dir/config/aerospace.toml"
@@ -91,6 +108,11 @@ grep -q "10 = 'main'" \
 if grep -q 'move-workspace-to-monitor' \
     "$root_dir/config/aerospace.toml"; then
     printf 'Force-assigned workspaces cannot be moved between monitors.\n' >&2
+    exit 1
+fi
+if grep -q 'com\.electron\.lark\.helper\|window-title} = 图片和视频' \
+    "$root_dir/config/aerospace.toml"; then
+    printf 'WeChat and Feishu must not have custom window rules.\n' >&2
     exit 1
 fi
 

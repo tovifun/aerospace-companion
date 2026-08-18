@@ -31,7 +31,8 @@ if [ -f "$state_file" ]; then
 fi
 
 runtime_id=io.github.tovifun.aerospace-companion.window-switcher
-pid_file="/tmp/$runtime_id.$(/usr/bin/id -u).pid"
+runtime_dir="$install_root/runtime"
+pid_file="$runtime_dir/$runtime_id.$(/usr/bin/id -u).pid"
 app="$install_root/AeroSpaceWindowSwitcher.app"
 
 if [ -r "$pid_file" ]; then

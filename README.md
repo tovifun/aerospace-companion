@@ -21,8 +21,7 @@ window of the focused app to another workspace.
 - `Option + Shift + M`: move every window of the focused app to workspace 1-9.
 - Automatic app routing for development, browsers, communication, media, and
   design workspaces.
-- Floating rules for writing tools, utilities, and the dedicated Feishu media
-  helper process.
+- Floating rules for writing tools and utilities.
 - Persistent workspaces, dual-monitor assignments, and an arrange mode.
 
 ## Requirements
@@ -76,6 +75,19 @@ The guide reports both permission states live. If the app is missing from the
 Input Monitoring list, use **Reveal App** and add it with the `+` button. Choose
 **Quit & Reopen** when macOS asks. This is a one-time setup; restarting AeroSpace
 does not request the permissions again.
+
+### Prefer the hovered item for Command actions
+
+By default, `Command + W/Q` acts on the blue keyboard selection. To let the
+gray item under the pointer take priority when one is hovered, run:
+
+```bash
+defaults write io.github.tovifun.aerospace-companion.window-switcher \
+  hoveredItemActionPriority -bool true
+```
+
+Set the value to `false` to restore keyboard-selection priority. Restart the
+window switcher after changing it.
 
 ## Update
 

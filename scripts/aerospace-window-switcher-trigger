@@ -3,8 +3,9 @@
 set -u
 
 runtime_id=io.github.tovifun.aerospace-companion.window-switcher
-pid_file="/tmp/$runtime_id.$(/usr/bin/id -u).pid"
 install_root=${AEROSPACE_COMPANION_HOME:-"$HOME/.local/share/aerospace-companion"}
+runtime_dir="$install_root/runtime"
+pid_file="$runtime_dir/$runtime_id.$(/usr/bin/id -u).pid"
 app="$install_root/AeroSpaceWindowSwitcher.app"
 binary="$app/Contents/MacOS/aerospace-window-switcher"
 direction=${1:---forward}

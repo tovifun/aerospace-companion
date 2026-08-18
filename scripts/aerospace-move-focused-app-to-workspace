@@ -7,6 +7,32 @@ script_dir="${0:A:h}"
 prompt="${AEROSPACE_COMPANION_PROMPT:-$script_dir/aerospace-workspace-prompt}"
 
 if [[ -z "$target" ]]; then
+  runtime_id=io.github.tovifun.aerospace-companion.window-switcher
+  install_root="${AEROSPACE_COMPANION_HOME:-$HOME/.local/share/aerospace-companion}"
+  pid_file="$install_root/runtime/$runtime_id.$(/usr/bin/id -u).pid"
+  app="$install_root/AeroSpaceWindowSwitcher.app"
+  binary="$app/Contents/MacOS/aerospace-window-switcher"
+
+  # The window switcher already runs as a warm daemon. Ask it to present the
+  # prompt so the shortcut does not pay AppKit process startup cost each time.
+  if [[ -r "$pid_file" ]]; then
+    pid="$(/bin/cat "$pid_file" 2>/dev/null || true)"
+    case "$pid" in
+      ''|*[!0-9]*) ;;
+      *)
+        command="$(/bin/ps -p "$pid" -o command= 2>/dev/null || true)"
+        case "$command" in
+          *"$binary"*)
+            if /bin/kill -URG "$pid" 2>/dev/null; then
+              exit 0
+            fi
+            ;;
+        esac
+        ;;
+    esac
+  fi
+
+  # Keep the standalone prompt as a fallback if the daemon is unavailable.
   target="$("$prompt" 2>/dev/null || true)"
 fi
 

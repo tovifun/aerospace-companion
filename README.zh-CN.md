@@ -19,7 +19,7 @@
 - 局部半透明浮层，自动跟随 macOS 浅色或深色外观。
 - `Option + Shift + M`：将当前 App 的所有窗口移动到 workspace 1-9。
 - 自动将开发、浏览器、通讯、媒体和设计应用分配到对应 workspace。
-- 写作工具、系统工具以及飞书独立媒体辅助进程自动悬浮。
+- 写作工具和系统工具自动悬浮。
 - 支持持久 workspace、多显示器分配和窗口整理模式。
 
 ## 环境要求
@@ -69,6 +69,18 @@ AEROSPACE_TERMINAL_APP=Kitty ./scripts/install.sh --with-config
 引导窗口会实时显示授权状态。如果输入监控列表中没有本应用，可以点击
 “显示应用”，再使用系统设置列表下方的 `+` 添加；macOS 询问时请选择
 “退出并重新打开”。这些权限只需授予一次，之后重启 AeroSpace 不会重复请求。
+
+### Command 操作优先使用鼠标悬停项
+
+默认情况下，`Command + W/Q` 操作蓝色的键盘选中项。若希望鼠标悬停在灰色
+项目上时优先操作该项目，可运行：
+
+```bash
+defaults write io.github.tovifun.aerospace-companion.window-switcher \
+  hoveredItemActionPriority -bool true
+```
+
+将值改为 `false` 即可恢复键盘选中项优先。修改后需重启窗口切换器。
 
 ## 更新
 

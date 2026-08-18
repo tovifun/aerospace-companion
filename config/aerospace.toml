@@ -32,17 +32,6 @@ gaps.outer.top = 4
 gaps.outer.right = 4
 
 on-window-detected = [
-    # Feishu media previews run in a separate helper process.
-    { if = 'test %{app-bundle-id} = com.electron.lark.helper', run = 'layout floating' },
-
-    # Let AeroSpace classify WeChat and Feishu dialogs natively. App-wide
-    # floating rules make regular windows briefly reflow and disturb focus.
-    {
-        if = 'test %{app-bundle-id} = com.tencent.xinWeChat && test %{window-title} = 图片和视频',
-        run = 'layout floating',
-        check-further-callbacks = true,
-    },
-
     # Writing and task apps stay on the current workspace as floating windows.
     { if = 'test %{app-bundle-id} = com.nickustinov.itsypad', run = 'layout floating' },
     { if = 'test %{app-bundle-id} = com.iconfactory.Tot', run = 'layout floating' },
@@ -110,6 +99,9 @@ on-window-detected = [
     { if = 'test %{app-bundle-id} = com.obsproject.obs-studio', run = 'move-node-to-workspace 5' },
     { if = 'test %{app-bundle-id} = com.timpler.screenstudio', run = 'move-node-to-workspace 5' },
     { if = 'test %{app-bundle-id} = org.audacityteam.audacity', run = 'move-node-to-workspace 5' },
+
+    # Workspace 9: ego browser.
+    { if = 'test %{app-bundle-id} = com.citrolabs.ego.lite', run = 'move-node-to-workspace 9' },
 
     # System utilities work better as floating windows.
     { if = 'test %{app-bundle-id} = com.apple.finder', run = 'layout floating' },
