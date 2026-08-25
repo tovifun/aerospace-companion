@@ -31,9 +31,31 @@ grep -q '!panel.frame.contains(NSEvent.mouseLocation)' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'maximumPanelHeight: CGFloat = 960' \
     "$root_dir/src/window-switcher/main.swift"
+grep -q 'scrollView.hasVerticalScroller = false' \
+    "$root_dir/src/window-switcher/main.swift"
 grep -q 'localScrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel)' \
     "$root_dir/src/window-switcher/main.swift"
+grep -q 'globalScrollMonitor = NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel)' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'localMagnifyMonitor = NSEvent.addLocalMonitorForEvents(matching: .magnify)' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'globalMagnifyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .magnify)' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'scrollSwitcher(byMagnification: event.magnification)' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'currentOrigin.y - magnification \* 800' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'panel.frame.contains(mouseLocation)' \
+    "$root_dir/src/window-switcher/main.swift"
 grep -q 'scrollView.scrollWheel(with: event)' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'CGEventType.scrollWheel.rawValue' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'scrollEventCopy.flags.subtracting(.maskCommand)' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'let scrollEvent = NSEvent(cgEvent: scrollEventCopy)' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'scrollView.scrollWheel(with: scrollEvent)' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'CGEvent.tapCreate' \
     "$root_dir/src/window-switcher/main.swift"

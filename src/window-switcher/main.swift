@@ -1023,6 +1023,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var localMouseMonitor: Any?
     private var globalMouseMonitor: Any?
     private var localScrollMonitor: Any?
+    private var globalScrollMonitor: Any?
+    private var localMagnifyMonitor: Any?
+    private var globalMagnifyMonitor: Any?
     private weak var switcherScrollView: NSScrollView?
     private var cycleObserver: NSObjectProtocol?
     private var forwardSignalSource: DispatchSourceSignal?
@@ -1322,6 +1325,63 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             scrollView.scrollWheel(with: event)
             return nil
         }
+        globalScrollMonitor = NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel) {
+            [weak self] event in
+            let mouseLocation = NSEvent.mouseLocation
+            DispatchQueue.main.async {
+                guard
+                    let self,
+                    let panel = self.panel,
+                    panel.isVisible,
+                    panel.frame.contains(mouseLocation),
+                    let scrollView = self.switcherScrollView
+                else {
+                    return
+                }
+
+                // Command-Tab is intercepted before the system app switcher runs.
+                // While Command remains held, macOS can still route wheel events to
+                // the previously active app, so the local monitor above never sees
+                // them. Forward those global events only while the pointer is over
+                // our panel.
+                scrollView.scrollWheel(with: event)
+            }
+        }
+        localMagnifyMonitor = NSEvent.addLocalMonitorForEvents(matching: .magnify) {
+            [weak self] event in
+            guard
+                let self,
+                self.trackedReleaseModifier == .command,
+                let panel = self.panel,
+                panel.isVisible,
+                event.window === panel
+            else {
+                return event
+            }
+
+            // Mac Mouse Fix maps Command + physical mouse-wheel input to
+            // magnification gestures instead of scroll-wheel events. Convert its
+            // gesture back to scrolling while our Command-Tab panel is active.
+            self.scrollSwitcher(byMagnification: event.magnification)
+            return nil
+        }
+        globalMagnifyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .magnify) {
+            [weak self] event in
+            let mouseLocation = NSEvent.mouseLocation
+            DispatchQueue.main.async {
+                guard
+                    let self,
+                    self.trackedReleaseModifier == .command,
+                    let panel = self.panel,
+                    panel.isVisible,
+                    panel.frame.contains(mouseLocation)
+                else {
+                    return
+                }
+
+                self.scrollSwitcher(byMagnification: event.magnification)
+            }
+        }
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
         NSAnimationContext.runAnimationGroup { context in
@@ -1336,6 +1396,28 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.setFrame(switcherFrame(for: targetScreen), display: false)
         panel.contentView = makeContentView(for: targetScreen)
         panel.makeKeyAndOrderFront(nil)
+    }
+
+    private func scrollSwitcher(byMagnification magnification: CGFloat) {
+        guard
+            magnification != 0,
+            let scrollView = switcherScrollView,
+            let documentView = scrollView.documentView
+        else {
+            return
+        }
+
+        let clipView = scrollView.contentView
+        let maximumY = max(0, documentView.bounds.height - clipView.bounds.height)
+        let currentOrigin = clipView.bounds.origin
+        let targetY = min(
+            maximumY,
+            max(0, currentOrigin.y - magnification * 800)
+        )
+        guard targetY != currentOrigin.y else { return }
+
+        clipView.scroll(to: NSPoint(x: currentOrigin.x, y: targetY))
+        scrollView.reflectScrolledClipView(clipView)
     }
 
     private func makeContentView(for screen: NSScreen) -> NSView {
@@ -1363,9 +1445,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         let scrollView = NSScrollView()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.drawsBackground = false
-        scrollView.hasVerticalScroller = true
-        scrollView.autohidesScrollers = true
-        scrollView.scrollerStyle = .overlay
+        scrollView.hasVerticalScroller = false
         scrollView.verticalScrollElasticity = .automatic
         switcherScrollView = scrollView
 
@@ -1991,6 +2071,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             NSEvent.removeMonitor(localScrollMonitor)
             self.localScrollMonitor = nil
         }
+        if let globalScrollMonitor {
+            NSEvent.removeMonitor(globalScrollMonitor)
+            self.globalScrollMonitor = nil
+        }
+        if let localMagnifyMonitor {
+            NSEvent.removeMonitor(localMagnifyMonitor)
+            self.localMagnifyMonitor = nil
+        }
+        if let globalMagnifyMonitor {
+            NSEvent.removeMonitor(globalMagnifyMonitor)
+            self.globalMagnifyMonitor = nil
+        }
     }
 
     private func showError(_ message: String) {
@@ -2176,6 +2268,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let eventMask = (CGEventMask(1) << CGEventType.keyDown.rawValue)
             | (CGEventMask(1) << CGEventType.keyUp.rawValue)
+            | (CGEventMask(1) << CGEventType.scrollWheel.rawValue)
         guard let eventTap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
@@ -2357,6 +2450,30 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                 CGEvent.tapEnable(tap: commandTabEventTap, enable: true)
             }
             return Unmanaged.passUnretained(event)
+        }
+
+        if type == .scrollWheel {
+            guard
+                let panel,
+                panel.isVisible,
+                panel.frame.contains(NSEvent.mouseLocation),
+                let scrollView = switcherScrollView,
+                let scrollEventCopy = event.copy()
+            else {
+                return Unmanaged.passUnretained(event)
+            }
+
+            // A physical mouse can emit discrete wheel events that never reach
+            // NSEvent monitors while Command is held. Handle them at the same
+            // session event tap that owns Command-Tab, before that routing occurs.
+            // Remove Command from the forwarded copy so NSScrollView treats a
+            // discrete mouse-wheel tick as scrolling instead of a modified gesture.
+            scrollEventCopy.flags = scrollEventCopy.flags.subtracting(.maskCommand)
+            guard let scrollEvent = NSEvent(cgEvent: scrollEventCopy) else {
+                return Unmanaged.passUnretained(event)
+            }
+            scrollView.scrollWheel(with: scrollEvent)
+            return nil
         }
 
         guard
