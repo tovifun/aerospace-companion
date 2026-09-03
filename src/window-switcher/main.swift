@@ -78,6 +78,106 @@ private struct RunningApp {
     let bundleIdentifier: String
 }
 
+private struct DockBadgeSnapshot {
+    static let empty = DockBadgeSnapshot(bundleIdentifiers: [], appNames: [])
+
+    let bundleIdentifiers: Set<String>
+    let appNames: Set<String>
+
+    func contains(bundleIdentifier: String, appName: String) -> Bool {
+        if !bundleIdentifier.isEmpty && bundleIdentifiers.contains(bundleIdentifier) {
+            return true
+        }
+        return appNames.contains(appName.lowercased())
+    }
+}
+
+private enum DockBadgeClient {
+    static func currentSnapshot() -> DockBadgeSnapshot {
+        guard let dock = NSRunningApplication
+            .runningApplications(withBundleIdentifier: "com.apple.dock")
+            .first
+        else {
+            return .empty
+        }
+
+        var bundleIdentifiers: Set<String> = []
+        var appNames: Set<String> = []
+        collectBadges(
+            from: AXUIElementCreateApplication(dock.processIdentifier),
+            depth: 0,
+            bundleIdentifiers: &bundleIdentifiers,
+            appNames: &appNames
+        )
+        return DockBadgeSnapshot(
+            bundleIdentifiers: bundleIdentifiers,
+            appNames: appNames
+        )
+    }
+
+    private static func collectBadges(
+        from element: AXUIElement,
+        depth: Int,
+        bundleIdentifiers: inout Set<String>,
+        appNames: inout Set<String>
+    ) {
+        guard depth <= 4 else { return }
+
+        let subrole = attribute("AXSubrole", from: element) as? String
+        if subrole == "AXApplicationDockItem",
+           let status = attribute("AXStatusLabel", from: element) as? String,
+           !status.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if let title = attribute("AXTitle", from: element) as? String,
+               !title.isEmpty {
+                appNames.insert(title.lowercased())
+            }
+            if let appURL = applicationURL(for: element),
+               let bundleIdentifier = Bundle(url: appURL)?.bundleIdentifier {
+                bundleIdentifiers.insert(bundleIdentifier)
+            }
+        }
+
+        guard let children = attribute("AXChildren", from: element) as? [AXUIElement]
+        else {
+            return
+        }
+        for child in children {
+            collectBadges(
+                from: child,
+                depth: depth + 1,
+                bundleIdentifiers: &bundleIdentifiers,
+                appNames: &appNames
+            )
+        }
+    }
+
+    private static func applicationURL(for element: AXUIElement) -> URL? {
+        let value = attribute("AXURL", from: element)
+        if let url = value as? URL {
+            return url
+        }
+        if let urlString = value as? String {
+            return URL(string: urlString)
+        }
+        return nil
+    }
+
+    private static func attribute(
+        _ name: String,
+        from element: AXUIElement
+    ) -> CFTypeRef? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            element,
+            name as CFString,
+            &value
+        ) == .success else {
+            return nil
+        }
+        return value
+    }
+}
+
 private enum SwitcherItem {
     case window(AeroWindow)
     case application(RunningApp)
@@ -105,7 +205,44 @@ private enum AeroSpaceClient {
     static func allWindows() throws -> [AeroWindow] {
         let format = "%{window-id} %{app-name} %{app-bundle-id} %{app-pid} %{workspace} %{window-title}"
         let data = try run(["list-windows", "--all", "--json", "--format", format])
-        return try JSONDecoder().decode([AeroWindow].self, from: data)
+        let windows = try JSONDecoder().decode([AeroWindow].self, from: data)
+        return excludingStaleUntitledWindows(windows)
+    }
+
+    private static func excludingStaleUntitledWindows(
+        _ windows: [AeroWindow]
+    ) -> [AeroWindow] {
+        let hasUntitledWindows = windows.contains {
+            $0.windowTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        guard hasUntitledWindows else { return windows }
+
+        guard let windowDescriptions = CGWindowListCopyWindowInfo(
+            [.optionAll, .excludeDesktopElements],
+            kCGNullWindowID
+        ) as? [[String: Any]] else {
+            // Keep AeroSpace's result if WindowServer cannot be queried. It is
+            // safer to show an extra item than hide a real untitled window.
+            return windows
+        }
+
+        var liveWindowOwners: [Int: pid_t] = [:]
+        for description in windowDescriptions {
+            guard
+                let windowID = description[kCGWindowNumber as String] as? NSNumber,
+                let ownerPID = description[kCGWindowOwnerPID as String] as? NSNumber
+            else {
+                continue
+            }
+            liveWindowOwners[windowID.intValue] = pid_t(ownerPID.int32Value)
+        }
+
+        return windows.filter { window in
+            let isUntitled = window.windowTitle
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty
+            return !isUntitled || liveWindowOwners[window.windowID] == window.appPID
+        }
     }
 
     static func focusedWindowID() -> Int? {
@@ -1039,6 +1176,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var permissionGuideCompletion: DispatchWorkItem?
     private var targetScreen: NSScreen?
     private var iconCache: [String: NSImage] = [:]
+    private var dockBadgeSnapshot = DockBadgeSnapshot.empty
     private var allWindows: [AeroWindow] = []
     private var windowlessApps: [RunningApp] = []
     private var orderedItems: [SwitcherItem] = []
@@ -1140,12 +1278,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             do {
                 let focusedWindowID = AeroSpaceClient.focusedWindowID()
                 let windows = try AeroSpaceClient.allWindows()
+                let dockBadgeSnapshot = DockBadgeClient.currentSnapshot()
                 DispatchQueue.main.async {
                     guard let self, self.loadGeneration == generation else { return }
                     let previousSelectionKey = preserveSelection
                         ? self.selectedItem?.key
                         : nil
                     self.focusedWindowID = focusedWindowID
+                    self.dockBadgeSnapshot = dockBadgeSnapshot
                     self.allWindows = windows
                     self.windowlessApps = self.runningAppsWithoutWindows(excluding: windows)
                     self.warmIconCache()
@@ -1624,9 +1764,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.updateHoveredItem(item.key, isHovered: isHovered)
         }
 
-        let icon = NSImageView(image: appIcon(bundleID: window.appBundleID))
-        icon.translatesAutoresizingMaskIntoConstraints = false
-        icon.imageScaling = .scaleProportionallyUpOrDown
+        let icon = appIconView(
+            image: appIcon(bundleID: window.appBundleID),
+            bundleIdentifier: window.appBundleID,
+            appName: window.appName
+        )
 
         let windowTitle = textLabel(
             fallbackTitle,
@@ -1666,9 +1808,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.updateHoveredItem(item.key, isHovered: isHovered)
         }
 
-        let icon = NSImageView(image: appIcon(for: app))
-        icon.translatesAutoresizingMaskIntoConstraints = false
-        icon.imageScaling = .scaleProportionallyUpOrDown
+        let icon = appIconView(
+            image: appIcon(for: app),
+            bundleIdentifier: app.bundleIdentifier,
+            appName: app.appName
+        )
 
         let appName = textLabel(
             app.appName,
@@ -2109,6 +2253,49 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             return image
         }
         return NSImage(systemSymbolName: "app", accessibilityDescription: nil) ?? NSImage()
+    }
+
+    private func appIconView(
+        image: NSImage,
+        bundleIdentifier: String,
+        appName: String
+    ) -> NSView {
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        let icon = NSImageView(image: image)
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        container.addSubview(icon)
+        NSLayoutConstraint.activate([
+            icon.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            icon.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            icon.topAnchor.constraint(equalTo: container.topAnchor),
+            icon.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+
+        if dockBadgeSnapshot.contains(
+            bundleIdentifier: bundleIdentifier,
+            appName: appName
+        ) {
+            let badge = NSView()
+            badge.translatesAutoresizingMaskIntoConstraints = false
+            badge.wantsLayer = true
+            badge.layer?.backgroundColor = NSColor.systemRed.cgColor
+            badge.layer?.cornerRadius = 4.5
+            badge.layer?.borderWidth = 1
+            badge.layer?.borderColor = NSColor.white.withAlphaComponent(0.9).cgColor
+            badge.setAccessibilityElement(false)
+            container.addSubview(badge)
+            NSLayoutConstraint.activate([
+                badge.widthAnchor.constraint(equalToConstant: 9),
+                badge.heightAnchor.constraint(equalToConstant: 9),
+                badge.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: 1),
+                badge.topAnchor.constraint(equalTo: container.topAnchor, constant: -1),
+            ])
+        }
+
+        return container
     }
 
     private func appIcon(for app: RunningApp) -> NSImage {

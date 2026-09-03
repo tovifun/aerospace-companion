@@ -1,0 +1,27 @@
+#!/bin/sh
+
+set -eu
+
+terminal_app=${1:-Ghostty}
+
+case "$terminal_app" in
+    Ghostty|Ghostty.app)
+        /usr/bin/osascript \
+            -e 'tell application "Ghostty" to new window' \
+            -e 'tell application "Ghostty" to activate'
+        ;;
+    Terminal|Terminal.app)
+        /usr/bin/osascript \
+            -e 'tell application "Terminal" to tell (do script) to activate'
+        ;;
+    iTerm|iTerm2|iTerm.app|iTerm2.app)
+        /usr/bin/osascript \
+            -e 'tell application "iTerm2" to create window with default profile' \
+            -e 'tell application "iTerm2" to activate'
+        ;;
+    *)
+        # Starting a fresh application instance is the most reliable generic
+        # fallback for terminals without a stable AppleScript dictionary.
+        /usr/bin/open -na "$terminal_app"
+        ;;
+esac

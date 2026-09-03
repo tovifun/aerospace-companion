@@ -10,6 +10,8 @@ sh -n "$root_dir/scripts/install.sh"
 sh -n "$root_dir/scripts/install-online.sh"
 sh -n "$root_dir/scripts/uninstall.sh"
 sh -n "$root_dir/scripts/aerospace-window-switcher-trigger"
+sh -n "$root_dir/scripts/aerospace-open-terminal-window"
+sh -n "$root_dir/scripts/aerospace-start-borders"
 zsh -n "$root_dir/scripts/aerospace-move-focused-app-to-workspace"
 plutil -lint "$root_dir/resources/Info.plist"
 
@@ -22,6 +24,20 @@ grep -q 'switchingTo: focusedWorkspace == window.workspace' \
 grep -q 'let hasCachedItems = !orderedItems.isEmpty' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'self.warmIconCache()' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'let dockBadgeSnapshot = DockBadgeClient.currentSnapshot()' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'attribute("AXStatusLabel", from: element)' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'subrole == "AXApplicationDockItem"' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'badge.layer?.backgroundColor = NSColor.systemRed.cgColor' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'return excludingStaleUntitledWindows(windows)' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'CGWindowListCopyWindowInfo' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'liveWindowOwners\[window.windowID\] == window.appPID' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'if isRefreshing || orderedItems.isEmpty' \
     "$root_dir/src/window-switcher/main.swift"
@@ -121,12 +137,56 @@ grep -q '^\[workspace-to-monitor-force-assignment\]' \
     "$root_dir/config/aerospace.toml"
 grep -q "1 = 'secondary'" \
     "$root_dir/config/aerospace.toml"
-grep -q "3 = 'secondary'" \
+grep -q "4 = 'secondary'" \
     "$root_dir/config/aerospace.toml"
-grep -q "4 = 'main'" \
+grep -q "5 = 'main'" \
     "$root_dir/config/aerospace.toml"
 grep -q "10 = 'main'" \
     "$root_dir/config/aerospace.toml"
+grep -Fq "com.google.Chrome', run = 'move-node-to-workspace 1'" \
+    "$root_dir/config/aerospace.toml"
+grep -Fq "com.github.tty7', run = 'move-node-to-workspace 2'" \
+    "$root_dir/config/aerospace.toml"
+grep -Fq "io.appmakes.otty', run = 'move-node-to-workspace 2'" \
+    "$root_dir/config/aerospace.toml"
+grep -Fq "com.DanPristupov.Fork', run = 'move-node-to-workspace 3'" \
+    "$root_dir/config/aerospace.toml"
+grep -Fq "com.electron.lark', run = 'move-node-to-workspace 4'" \
+    "$root_dir/config/aerospace.toml"
+grep -Fq "com.spotify.client', run = 'move-node-to-workspace 5'" \
+    "$root_dir/config/aerospace.toml"
+grep -Fq "com.figma.Desktop', run = 'move-node-to-workspace 6'" \
+    "$root_dir/config/aerospace.toml"
+grep -Fq "com.anysphere.sand', run = 'move-node-to-workspace 10'" \
+    "$root_dir/config/aerospace.toml"
+grep -q "on-focused-monitor-changed = \['move-mouse monitor-lazy-center'\]" \
+    "$root_dir/config/aerospace.toml"
+grep -q "alt-backtick = 'focus-back-and-forth || workspace-back-and-forth'" \
+    "$root_dir/config/aerospace.toml"
+grep -q "alt-r = 'mode resize'" \
+    "$root_dir/config/aerospace.toml"
+grep -q '^\[mode.resize.binding\]' \
+    "$root_dir/config/aerospace.toml"
+grep -q "alt-0 = 'workspace 10'" \
+    "$root_dir/config/aerospace.toml"
+grep -q "alt-shift-0 = 'move-node-to-workspace --focus-follows-window 10'" \
+    "$root_dir/config/aerospace.toml"
+grep -Fq 'list-workspaces --monitor focused --empty no | workspace --wrap-around --stdin next' \
+    "$root_dir/config/aerospace.toml"
+grep -Fq 'Picture in Picture|画中画|Mini ?Player|迷你播放器' \
+    "$root_dir/config/aerospace.toml"
+grep -q 'aerospace-start-borders' \
+    "$root_dir/config/aerospace.toml"
+grep -q '^accordion-padding = 0$' \
+    "$root_dir/config/aerospace.toml"
+grep -q '^gaps.inner.horizontal = 8$' \
+    "$root_dir/config/aerospace.toml"
+grep -q '^gaps.outer.left = 8$' \
+    "$root_dir/config/aerospace.toml"
+grep -q 'width=3.0' \
+    "$root_dir/scripts/aerospace-start-borders"
+grep -q 'active_color=0x4d000000' \
+    "$root_dir/scripts/aerospace-start-borders"
 if grep -q 'move-workspace-to-monitor' \
     "$root_dir/config/aerospace.toml"; then
     printf 'Force-assigned workspaces cannot be moved between monitors.\n' >&2
@@ -172,6 +232,8 @@ AEROSPACE_COMPANION_SKIP_RELOAD=1 \
 
 test -x "$test_home/.local/bin/aerospace-window-switcher-trigger"
 test -x "$test_home/.local/bin/aerospace-move-focused-app-to-workspace"
+test -x "$test_home/.local/bin/aerospace-open-terminal-window"
+test -x "$test_home/.local/bin/aerospace-start-borders"
 test ! -e "$test_home/.local/bin/aerospace-float-secondary-window"
 test -x "$test_home/.local/bin/aerospace-companion-update"
 test -x "$test_home/.local/bin/aerospace-workspace-prompt"

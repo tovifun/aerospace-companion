@@ -1,0 +1,25 @@
+#!/bin/sh
+
+set -eu
+
+find_borders() {
+    if command -v borders >/dev/null 2>&1; then
+        command -v borders
+    elif [ -x /opt/homebrew/bin/borders ]; then
+        printf '/opt/homebrew/bin/borders\n'
+    elif [ -x /usr/local/bin/borders ]; then
+        printf '/usr/local/bin/borders\n'
+    fi
+}
+
+borders_bin=$(find_borders)
+[ -n "$borders_bin" ] || exit 0
+
+# Draw only the active border so the desktop stays visually quiet. Calling an
+# already-running JankyBorders instance updates it instead of starting a copy.
+exec "$borders_bin" \
+    style=round \
+    width=3.0 \
+    hidpi=on \
+    active_color=0x4d000000 \
+    inactive_color=0x00000000

@@ -22,7 +22,10 @@ window of the focused app to another workspace.
 - Automatic app routing for development, browsers, communication, media, and
   design workspaces.
 - Floating rules for writing tools and utilities.
-- Persistent workspaces, dual-monitor assignments, and an arrange mode.
+- Picture-in-Picture and mini-player windows stay floating on the current
+  workspace.
+- Persistent workspaces, dual-monitor assignments, focus wrapping, dedicated
+  resize and arrange modes, and lazy mouse movement between displays.
 
 ## Requirements
 
@@ -54,14 +57,32 @@ cd aerospace-companion
 ./scripts/install.sh --with-config
 ```
 
-Ghostty is the default terminal for `Option + Enter`. Choose another app at
-install time:
+Ghostty is the default terminal for `Option + Enter`, and each press creates a
+new window. Choose another app at install time:
 
 ```bash
 AEROSPACE_TERMINAL_APP=Kitty ./scripts/install.sh --with-config
 ```
 
 Without `--with-config`, the local installer updates only the companion tools.
+
+### Optional community integrations
+
+The installed configuration automatically starts JankyBorders when its
+`borders` binary is available:
+
+```bash
+brew install FelixKratz/formulae/borders
+```
+
+For three-finger workspace switching that skips empty workspaces and wraps at
+the ends, install
+[aerospace-swipe](https://github.com/acsandmann/aerospace-swipe). It runs as a
+separate launch agent and may request Accessibility permission:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/acsandmann/aerospace-swipe/main/install.sh | bash
+```
 
 ### First-run permissions
 
@@ -103,13 +124,16 @@ Updates back up the current config before replacing it.
 
 | Workspace | Category | Apps |
 | --- | --- | --- |
-| `1` | Development | Codex, Claude, Zed, Cursor, VS Code, Xcode, Ghostty, DataGrip, Fork, OpenCode |
-| `2` | Browsers | Chrome, Safari, Edge, Dia, Vivaldi, ChatGPT Atlas |
-| `3` | Communication | Feishu, WeChat, WeCom, Tencent Meeting, Mail |
-| `4` | Media | Music, NetEase Music, Soda Music, VLC, Bilibili, Douyin, TV |
-| `5` | Design | Figma, Eagle, RightFont, OBS, Screen Studio, Audacity |
+| `1` | Browsers and reference | Chrome, Safari, Edge, Dia, Vivaldi, ChatGPT Atlas |
+| `2` | Primary development | Codex, Zed, Cursor, VS Code, Xcode, Ghostty, cmux, tty7, Otty, OpenCode |
+| `3` | Supporting development | Fork, DataGrip, Requestly |
+| `4` | Communication | Feishu, WeChat, WeCom, Tencent Meeting, Mail |
+| `5` | Media | Music, NetEase Music, Soda Music, Spotify, VLC, Bilibili, Douyin, TV |
+| `6` | Design and content | Figma, Eagle, RightFont, OBS, Screen Studio, Audacity |
+| `7-9` | Temporary | No automatic routing |
+| `10` | AI and research | ego lite, Claude, WorkBuddy AI, Grok Bot |
 
-Workspaces 1-3 are assigned to the secondary display and workspaces 4-10 to
+Workspaces 1-4 are assigned to the secondary display and workspaces 5-10 to
 the main display. If the secondary display is disconnected, its workspaces
 temporarily move to the main display and automatically return when it is
 reconnected. Writing and task apps stay on the current workspace as floating
@@ -124,14 +148,17 @@ windows.
 | `Option + Shift + M` | Move all windows of the focused app |
 | `Command + W` | Close the selected window while the switcher is open |
 | `Command + Q` | Quit the selected window's app while the switcher is open |
-| `Option + H/J/K/L` | Focus left/down/up/right |
+| `Option + H/J/K/L` | Focus left/down/up/right, wrapping at workspace edges |
+| `Option + Backtick` | Toggle the two most recently focused windows |
 | `Option + Shift + H/J/K/L` | Move the focused window |
-| `Option + 1-9` | Switch workspace |
-| `Option + Shift + 1-9` | Move the window and follow it |
+| `Option + 1-9/0` | Switch to workspace 1-10 |
+| `Option + Shift + 1-9/0` | Move the window to workspace 1-10 and follow it |
+| `Option + Left/Right` | Cycle non-empty workspaces on the focused display |
 | `Option + /` | Toggle tiles and accordion |
 | `Option + Shift + /` | Change tile orientation |
 | `Option + Shift + Space` | Toggle floating and tiling |
 | `Option + F` | Toggle fullscreen |
+| `Option + R` | Enter resize mode |
 | `Option + B` | Switch to the previous workspace |
 | `Option + S` | Enter arrange mode |
 | `Option + Control + H/J/K/L` | Focus another monitor |
@@ -140,6 +167,9 @@ windows.
 In arrange mode, use `H/J/K/L` to swap windows,
 `Shift + H/J/K/L` to group windows, `R` to flatten the workspace, and `Esc` to
 exit.
+
+In resize mode, use `H/J/K/L` for 50-point width/height changes,
+`Shift + H/J/K/L` for 10-point changes, and `Enter` or `Esc` to exit.
 
 ## Uninstall
 

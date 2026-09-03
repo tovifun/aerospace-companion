@@ -20,7 +20,9 @@
 - `Option + Shift + M`：将当前 App 的所有窗口移动到 workspace 1-9。
 - 自动将开发、浏览器、通讯、媒体和设计应用分配到对应 workspace。
 - 写作工具和系统工具自动悬浮。
-- 支持持久 workspace、多显示器分配和窗口整理模式。
+- 画中画和迷你播放器窗口悬浮在当前 workspace。
+- 支持持久 workspace、多显示器分配、焦点循环、独立缩放与窗口整理模式，
+  切换显示器时鼠标按需跟随。
 
 ## 环境要求
 
@@ -51,13 +53,29 @@ cd aerospace-companion
 ./scripts/install.sh --with-config
 ```
 
-`Option + Enter` 默认打开 Ghostty。可以在安装时改成其他终端：
+`Option + Enter` 默认打开一个新的 Ghostty 窗口。可以在安装时改成其他终端：
 
 ```bash
 AEROSPACE_TERMINAL_APP=Kitty ./scripts/install.sh --with-config
 ```
 
 不传 `--with-config` 时，本地安装器只更新辅助工具，不替换配置。
+
+### 可选社区集成
+
+安装后的配置会在检测到 `borders` 命令时自动启动 JankyBorders：
+
+```bash
+brew install FelixKratz/formulae/borders
+```
+
+如需三指横扫切换 workspace，并自动跳过空 workspace、在首尾循环，可安装
+[aerospace-swipe](https://github.com/acsandmann/aerospace-swipe)。它作为独立的
+launch agent 运行，首次启动可能要求辅助功能权限：
+
+```bash
+curl -sSL https://raw.githubusercontent.com/acsandmann/aerospace-swipe/main/install.sh | bash
+```
 
 ### 首次授权
 
@@ -96,14 +114,17 @@ defaults write io.github.tovifun.aerospace-companion.window-switcher \
 
 | Workspace | 分类 | 应用 |
 | --- | --- | --- |
-| `1` | 开发 | Codex、Claude、Zed、Cursor、VS Code、Xcode、Ghostty、DataGrip、Fork、OpenCode |
-| `2` | 浏览器 | Chrome、Safari、Edge、Dia、Vivaldi、ChatGPT Atlas |
-| `3` | 通讯 | 飞书、微信、企业微信、腾讯会议、Mail |
-| `4` | 媒体 | Music、网易云音乐、汽水音乐、VLC、哔哩哔哩、抖音、TV |
-| `5` | 设计 | Figma、Eagle、RightFont、OBS、Screen Studio、Audacity |
+| `1` | 浏览和资料 | Chrome、Safari、Edge、Dia、Vivaldi、ChatGPT Atlas |
+| `2` | 开发主区 | Codex、Zed、Cursor、VS Code、Xcode、Ghostty、cmux、tty7、Otty、OpenCode |
+| `3` | 开发辅助 | Fork、DataGrip、Requestly |
+| `4` | 沟通 | 飞书、微信、企业微信、腾讯会议、Mail |
+| `5` | 音乐视频 | Music、网易云音乐、汽水音乐、Spotify、VLC、哔哩哔哩、抖音、TV |
+| `6` | 设计内容 | Figma、Eagle、RightFont、OBS、Screen Studio、Audacity |
+| `7-9` | 临时工作区 | 不自动分配应用 |
+| `10` | AI、研究 | ego lite、Claude、WorkBuddy AI、Grok Bot |
 
-Workspace 1-3 固定分配到扩展显示器，4-10 固定分配到主显示器。拔掉扩展
-显示器后，1-3 会临时汇总到主显示器；重新连接后会自动回到扩展显示器。
+Workspace 1-4 固定分配到扩展显示器，5-10 固定分配到主显示器。拔掉扩展
+显示器后，1-4 会临时汇总到主显示器；重新连接后会自动回到扩展显示器。
 写作和任务应用不绑定 workspace，默认悬浮在当前 workspace。
 
 ## 常用快捷键
@@ -115,14 +136,17 @@ Workspace 1-3 固定分配到扩展显示器，4-10 固定分配到主显示器�
 | `Option + Shift + M` | 移动当前 App 的全部窗口 |
 | `Command + W` | 切换器打开时关闭选中的窗口 |
 | `Command + Q` | 切换器打开时退出选中窗口所属的 App |
-| `Option + H/J/K/L` | 向左/下/上/右聚焦窗口 |
+| `Option + H/J/K/L` | 向左/下/上/右聚焦窗口，到 workspace 边缘后循环 |
+| `Option + 反引号` | 在最近聚焦的两个窗口间切换 |
 | `Option + Shift + H/J/K/L` | 移动当前窗口 |
-| `Option + 1-9` | 切换 workspace |
-| `Option + Shift + 1-9` | 移动当前窗口并跟随 |
+| `Option + 1-9/0` | 切换到 workspace 1-10 |
+| `Option + Shift + 1-9/0` | 移动当前窗口到 workspace 1-10 并跟随 |
+| `Option + 左/右方向键` | 循环当前显示器上的非空 workspace |
 | `Option + /` | 在 tiles 和 accordion 间切换 |
 | `Option + Shift + /` | 修改 tile 方向 |
 | `Option + Shift + Space` | 在 floating 和 tiling 间切换 |
 | `Option + F` | 切换全屏 |
+| `Option + R` | 进入窗口缩放模式 |
 | `Option + B` | 返回上一个 workspace |
 | `Option + S` | 进入窗口整理模式 |
 | `Option + Control + H/J/K/L` | 聚焦其他显示器 |
@@ -130,6 +154,9 @@ Workspace 1-3 固定分配到扩展显示器，4-10 固定分配到主显示器�
 
 整理模式中，使用 `H/J/K/L` 交换窗口，`Shift + H/J/K/L` 创建窗口分组，
 `R` 扁平化当前 workspace，`Esc` 退出。
+
+缩放模式中，使用 `H/J/K/L` 以 50 点调整宽度或高度，
+`Shift + H/J/K/L` 以 10 点微调，使用 `Enter` 或 `Esc` 退出。
 
 ## 卸载
 
