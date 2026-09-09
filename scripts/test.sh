@@ -9,6 +9,7 @@ sh -n "$root_dir/scripts/build.sh"
 sh -n "$root_dir/scripts/install.sh"
 sh -n "$root_dir/scripts/install-online.sh"
 sh -n "$root_dir/scripts/uninstall.sh"
+sh -n "$root_dir/scripts/aerospace-show-ambient"
 sh -n "$root_dir/scripts/aerospace-window-switcher-trigger"
 sh -n "$root_dir/scripts/aerospace-open-terminal-window"
 sh -n "$root_dir/scripts/aerospace-start-borders"
@@ -33,6 +34,22 @@ grep -q 'subrole == "AXApplicationDockItem"' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'badge.layer?.backgroundColor = NSColor.systemRed.cgColor' \
     "$root_dir/src/window-switcher/main.swift"
+grep -q 'rawLabel.compactMap(\\.wholeNumberValue)' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'let audioActivitySnapshot = AudioActivityClient.currentSnapshot()' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'kAudioHardwarePropertyProcessObjectList' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'kAudioProcessPropertyIsRunningOutput' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'kAudioProcessPropertyIsRunningInput' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'systemSymbolName: "mic.fill"' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'systemSymbolName: "speaker.wave.2.fill"' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q -- '-framework CoreAudio' \
+    "$root_dir/scripts/build.sh"
 grep -q 'return excludingStaleUntitledWindows(windows)' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'CGWindowListCopyWindowInfo' \
@@ -48,6 +65,10 @@ grep -q '!panel.frame.contains(NSEvent.mouseLocation)' \
 grep -q 'maximumPanelHeight: CGFloat = 960' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'scrollView.hasVerticalScroller = false' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'OverflowFadingScrollView' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'canScrollBelow ? transparent : opaque' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'localScrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel)' \
     "$root_dir/src/window-switcher/main.swift"
@@ -81,11 +102,37 @@ grep -q 'case kVK_ANSI_W:' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'case kVK_ANSI_Q:' \
     "$root_dir/src/window-switcher/main.swift"
+grep -q 'case kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'commandSelectionShortcutNumber(for: item)' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q '"⌘\\(number)"' \
+    "$root_dir/src/window-switcher/main.swift"
 grep -q 'run(\["close", "--window-id", String(windowID)\])' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'runningApplication.terminate()' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'case appPID = "app-pid"' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'case isFullscreen = "window-is-fullscreen"' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'case windowLayout = "window-layout"' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'case workspaceIsVisible = "workspace-is-visible"' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'case monitorName = "monitor-name"' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'case "4": role = localized("CODE & EDITORS", "Codex 与编辑器")' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'case "8": role = localized("COMMUNICATION", "沟通")' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'case "10": role = localized("AMBIENT", "氛围空屏")' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'parts.append(localized("CURRENT", "当前"))' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'window?.windowLayout == "floating"' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'NSRunningApplication(processIdentifier: processIdentifier)?.isHidden' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'AXIsProcessTrustedWithOptions' \
     "$root_dir/src/window-switcher/main.swift"
@@ -118,46 +165,71 @@ grep -q 'let target = commandActionTarget' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'DispatchSource.makeSignalSource(signal: SIGURG, queue: .main)' \
     "$root_dir/src/window-switcher/main.swift"
-grep -q 'prepareWorkspacePrompt()' \
+grep -q 'prepareWindowControlPanel()' \
     "$root_dir/src/window-switcher/main.swift"
-grep -q 'workspaceList.orientation = .vertical' \
+grep -q 'private final class WindowControlPanelController' \
     "$root_dir/src/window-switcher/main.swift"
-grep -q 'section.widthAnchor.constraint(equalTo: workspaceList.widthAnchor)' \
+grep -q 'for rowRange in \[1\.\.\.5, 6\.\.\.10\]' \
     "$root_dir/src/window-switcher/main.swift"
-grep -q 'windowRow.widthAnchor.constraint(equalTo: section.widthAnchor)' \
+grep -q 'case moveApplicationToWorkspace(String)' \
     "$root_dir/src/window-switcher/main.swift"
-grep -q 'self.updateWorkspacePromptIfVisible()' \
+grep -q 'self.updateWindowControlPanelIfVisible()' \
     "$root_dir/src/window-switcher/main.swift"
-grep -q '"● current workspace   → focused window   · windows to move' \
+grep -q '"1–0 当前窗口   ⇧1–0 当前 App 全部窗口' \
     "$root_dir/src/window-switcher/main.swift"
+grep -q '"move-node-to-monitor", "--focus-follows-window"' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q '"flatten-workspace-tree", "--workspace", request.targetWorkspace' \
+    "$root_dir/src/window-switcher/main.swift"
+grep -q 'case "a":' "$root_dir/src/window-switcher/main.swift"
+grep -q 'case "z":' "$root_dir/src/window-switcher/main.swift"
+grep -q 'target == "0" ? "10"' "$root_dir/src/workspace-prompt/main.swift"
 grep -q '/bin/kill -URG "$pid"' \
     "$root_dir/scripts/aerospace-move-focused-app-to-workspace"
 grep -q 'pgrep -f "$legacy_binary"' "$root_dir/scripts/install.sh"
 grep -q '^\[workspace-to-monitor-force-assignment\]' \
     "$root_dir/config/aerospace.toml"
-grep -q "1 = 'secondary'" \
+grep -q "1 = 'built-in'" \
     "$root_dir/config/aerospace.toml"
-grep -q "4 = 'secondary'" \
+grep -q "4 = 'dell'" \
     "$root_dir/config/aerospace.toml"
-grep -q "5 = 'main'" \
+grep -q "7 = 'dell'" \
     "$root_dir/config/aerospace.toml"
-grep -q "10 = 'main'" \
+grep -Fq "10 = ['^Portrait$', '^$', 'dell', 'built-in']" \
     "$root_dir/config/aerospace.toml"
-grep -Fq "com.google.Chrome', run = 'move-node-to-workspace 1'" \
+grep -Fq "layout --workspace 4 --root h_tiles" \
     "$root_dir/config/aerospace.toml"
-grep -Fq "com.github.tty7', run = 'move-node-to-workspace 2'" \
+grep -Fq "layout --workspace 10 --root v_accordion" \
     "$root_dir/config/aerospace.toml"
-grep -Fq "io.appmakes.otty', run = 'move-node-to-workspace 2'" \
+grep -Fq "com.google.Chrome', run = 'move-node-to-workspace 2'" \
     "$root_dir/config/aerospace.toml"
-grep -Fq "com.DanPristupov.Fork', run = 'move-node-to-workspace 3'" \
+grep -Fq "com.citrolabs.ego.lite', run = 'move-node-to-workspace 2'" \
     "$root_dir/config/aerospace.toml"
-grep -Fq "com.electron.lark', run = 'move-node-to-workspace 4'" \
+grep -Fq "com.github.tty7', run = 'move-node-to-workspace 5'" \
     "$root_dir/config/aerospace.toml"
-grep -Fq "com.spotify.client', run = 'move-node-to-workspace 5'" \
+grep -Fq "io.appmakes.otty', run = 'move-node-to-workspace 5'" \
     "$root_dir/config/aerospace.toml"
-grep -Fq "com.figma.Desktop', run = 'move-node-to-workspace 6'" \
+grep -Fq "com.DanPristupov.Fork', run = 'move-node-to-workspace 6'" \
     "$root_dir/config/aerospace.toml"
-grep -Fq "com.anysphere.sand', run = 'move-node-to-workspace 10'" \
+grep -Fq "com.electron.lark', run = 'move-node-to-workspace 8'" \
+    "$root_dir/config/aerospace.toml"
+grep -Fq "com.spotify.client', run = 'move-node-to-workspace 1'" \
+    "$root_dir/config/aerospace.toml"
+grep -Fq "com.figma.Desktop', run = 'move-node-to-workspace 7'" \
+    "$root_dir/config/aerospace.toml"
+grep -Fq "com.anysphere.sand', run = 'move-node-to-workspace 9'" \
+    "$root_dir/config/aerospace.toml"
+grep -Fq "abnerworks.Typora', run = 'move-node-to-workspace 7'" \
+    "$root_dir/config/aerospace.toml"
+grep -Fq "com.apple.ActivityMonitor', run = 'move-node-to-workspace 6'" \
+    "$root_dir/config/aerospace.toml"
+grep -Fq "com.apple.iCal', run = 'move-node-to-workspace 8'" \
+    "$root_dir/config/aerospace.toml"
+grep -q "alt-ctrl-2 = 'focus-monitor dell'" \
+    "$root_dir/config/aerospace.toml"
+grep -q "alt-ctrl-1 = 'focus-monitor built-in'" \
+    "$root_dir/config/aerospace.toml"
+grep -q "alt-ctrl-3 = 'focus-monitor 3'" \
     "$root_dir/config/aerospace.toml"
 grep -q "on-focused-monitor-changed = \['move-mouse monitor-lazy-center'\]" \
     "$root_dir/config/aerospace.toml"
@@ -169,6 +241,10 @@ grep -q '^\[mode.resize.binding\]' \
     "$root_dir/config/aerospace.toml"
 grep -q "alt-0 = 'workspace 10'" \
     "$root_dir/config/aerospace.toml"
+grep -q "alt-ctrl-0 = 'exec-and-forget __HOME__/.local/bin/aerospace-show-ambient'" \
+    "$root_dir/config/aerospace.toml"
+grep -q 'install -m 755 "$root_dir/scripts/aerospace-show-ambient"' \
+    "$root_dir/scripts/install.sh"
 grep -q "alt-shift-0 = 'move-node-to-workspace --focus-follows-window 10'" \
     "$root_dir/config/aerospace.toml"
 grep -Fq 'list-workspaces --monitor focused --empty no | workspace --wrap-around --stdin next' \
@@ -234,6 +310,7 @@ test -x "$test_home/.local/bin/aerospace-window-switcher-trigger"
 test -x "$test_home/.local/bin/aerospace-move-focused-app-to-workspace"
 test -x "$test_home/.local/bin/aerospace-open-terminal-window"
 test -x "$test_home/.local/bin/aerospace-start-borders"
+test -x "$test_home/.local/bin/aerospace-show-ambient"
 test ! -e "$test_home/.local/bin/aerospace-float-secondary-window"
 test -x "$test_home/.local/bin/aerospace-companion-update"
 test -x "$test_home/.local/bin/aerospace-workspace-prompt"
@@ -267,6 +344,7 @@ AEROSPACE_COMPANION_SKIP_RELOAD=1 \
 
 grep -q '^# original config' "$test_home/.aerospace.toml"
 test ! -e "$test_home/.local/share/aerospace-companion"
+test ! -e "$test_home/.local/bin/aerospace-show-ambient"
 
 archive_path="$test_root/aerospace-companion.tar.gz"
 tar -czf "$archive_path" \

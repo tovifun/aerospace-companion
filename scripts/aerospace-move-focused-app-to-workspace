@@ -14,7 +14,8 @@ if [[ -z "$target" ]]; then
   binary="$app/Contents/MacOS/aerospace-window-switcher"
 
   # The window switcher already runs as a warm daemon. Ask it to present the
-  # prompt so the shortcut does not pay AppKit process startup cost each time.
+  # window control panel so the shortcut does not pay AppKit process startup
+  # cost each time.
   if [[ -r "$pid_file" ]]; then
     pid="$(/bin/cat "$pid_file" 2>/dev/null || true)"
     case "$pid" in
@@ -40,8 +41,8 @@ if [[ -z "$target" ]]; then
   exit 0
 fi
 
-if [[ "$target" != [1-9] ]]; then
-  print -u2 "Workspace must be a number from 1 to 9."
+if [[ "$target" != [1-9] && "$target" != 10 ]]; then
+  print -u2 "Workspace must be a number from 1 to 10."
   exit 2
 fi
 

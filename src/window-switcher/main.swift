@@ -1,6 +1,7 @@
 import Cocoa
 import ApplicationServices
 import Carbon
+import CoreAudio
 import Darwin
 import QuartzCore
 
@@ -56,6 +57,12 @@ private struct AeroWindow: Decodable {
     let appPID: pid_t
     let workspace: String
     let windowTitle: String
+    let isFullscreen: Bool
+    let windowLayout: String
+    let workspaceIsFocused: Bool
+    let workspaceIsVisible: Bool
+    let monitorID: Int
+    let monitorName: String
 
     enum CodingKeys: String, CodingKey {
         case windowID = "window-id"
@@ -64,11 +71,21 @@ private struct AeroWindow: Decodable {
         case appPID = "app-pid"
         case workspace
         case windowTitle = "window-title"
+        case isFullscreen = "window-is-fullscreen"
+        case windowLayout = "window-layout"
+        case workspaceIsFocused = "workspace-is-focused"
+        case workspaceIsVisible = "workspace-is-visible"
+        case monitorID = "monitor-id"
+        case monitorName = "monitor-name"
     }
 }
 
 private struct WorkspaceGroup {
     let workspace: String
+    let isFocused: Bool
+    let isVisible: Bool
+    let monitorID: Int
+    let monitorName: String
     var windows: [AeroWindow]
 }
 
@@ -78,17 +95,31 @@ private struct RunningApp {
     let bundleIdentifier: String
 }
 
-private struct DockBadgeSnapshot {
-    static let empty = DockBadgeSnapshot(bundleIdentifiers: [], appNames: [])
+private struct DockBadgeStatus {
+    let rawLabel: String
 
-    let bundleIdentifiers: Set<String>
-    let appNames: Set<String>
-
-    func contains(bundleIdentifier: String, appName: String) -> Bool {
-        if !bundleIdentifier.isEmpty && bundleIdentifiers.contains(bundleIdentifier) {
-            return true
+    var displayCount: String? {
+        let digits = rawLabel.compactMap(\.wholeNumberValue).map(String.init).joined()
+        guard let count = Int(digits), count > 0 else { return nil }
+        if rawLabel.contains("+") {
+            return "\(count)+"
         }
-        return appNames.contains(appName.lowercased())
+        return count > 999 ? "999+" : String(count)
+    }
+}
+
+private struct DockBadgeSnapshot {
+    static let empty = DockBadgeSnapshot(bundleIdentifiers: [:], appNames: [:])
+
+    let bundleIdentifiers: [String: DockBadgeStatus]
+    let appNames: [String: DockBadgeStatus]
+
+    func status(bundleIdentifier: String, appName: String) -> DockBadgeStatus? {
+        if !bundleIdentifier.isEmpty,
+           let status = bundleIdentifiers[bundleIdentifier] {
+            return status
+        }
+        return appNames[appName.lowercased()]
     }
 }
 
@@ -101,8 +132,8 @@ private enum DockBadgeClient {
             return .empty
         }
 
-        var bundleIdentifiers: Set<String> = []
-        var appNames: Set<String> = []
+        var bundleIdentifiers: [String: DockBadgeStatus] = [:]
+        var appNames: [String: DockBadgeStatus] = [:]
         collectBadges(
             from: AXUIElementCreateApplication(dock.processIdentifier),
             depth: 0,
@@ -118,22 +149,25 @@ private enum DockBadgeClient {
     private static func collectBadges(
         from element: AXUIElement,
         depth: Int,
-        bundleIdentifiers: inout Set<String>,
-        appNames: inout Set<String>
+        bundleIdentifiers: inout [String: DockBadgeStatus],
+        appNames: inout [String: DockBadgeStatus]
     ) {
         guard depth <= 4 else { return }
 
         let subrole = attribute("AXSubrole", from: element) as? String
         if subrole == "AXApplicationDockItem",
-           let status = attribute("AXStatusLabel", from: element) as? String,
-           !status.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            if let title = attribute("AXTitle", from: element) as? String,
-               !title.isEmpty {
-                appNames.insert(title.lowercased())
-            }
-            if let appURL = applicationURL(for: element),
-               let bundleIdentifier = Bundle(url: appURL)?.bundleIdentifier {
-                bundleIdentifiers.insert(bundleIdentifier)
+           let rawStatus = attribute("AXStatusLabel", from: element) as? String {
+            let statusLabel = rawStatus.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !statusLabel.isEmpty {
+                let status = DockBadgeStatus(rawLabel: statusLabel)
+                if let title = attribute("AXTitle", from: element) as? String,
+                   !title.isEmpty {
+                    appNames[title.lowercased()] = status
+                }
+                if let appURL = applicationURL(for: element),
+                   let bundleIdentifier = Bundle(url: appURL)?.bundleIdentifier {
+                    bundleIdentifiers[bundleIdentifier] = status
+                }
             }
         }
 
@@ -178,6 +212,180 @@ private enum DockBadgeClient {
     }
 }
 
+private struct AudioActivitySnapshot {
+    static let empty = AudioActivitySnapshot(
+        inputProcessIdentifiers: [],
+        inputBundleIdentifiers: [],
+        outputProcessIdentifiers: [],
+        outputBundleIdentifiers: []
+    )
+
+    let inputProcessIdentifiers: Set<pid_t>
+    let inputBundleIdentifiers: Set<String>
+    let outputProcessIdentifiers: Set<pid_t>
+    let outputBundleIdentifiers: Set<String>
+
+    func isInputActive(processIdentifier: pid_t, bundleIdentifier: String) -> Bool {
+        return contains(
+            processIdentifier: processIdentifier,
+            bundleIdentifier: bundleIdentifier,
+            processIdentifiers: inputProcessIdentifiers,
+            bundleIdentifiers: inputBundleIdentifiers
+        )
+    }
+
+    func isOutputActive(processIdentifier: pid_t, bundleIdentifier: String) -> Bool {
+        return contains(
+            processIdentifier: processIdentifier,
+            bundleIdentifier: bundleIdentifier,
+            processIdentifiers: outputProcessIdentifiers,
+            bundleIdentifiers: outputBundleIdentifiers
+        )
+    }
+
+    private func contains(
+        processIdentifier: pid_t,
+        bundleIdentifier: String,
+        processIdentifiers: Set<pid_t>,
+        bundleIdentifiers: Set<String>
+    ) -> Bool {
+        if processIdentifiers.contains(processIdentifier) {
+            return true
+        }
+
+        let normalizedBundleIdentifier = bundleIdentifier.lowercased()
+        guard !normalizedBundleIdentifier.isEmpty else { return false }
+        return bundleIdentifiers.contains { audioBundleIdentifier in
+            audioBundleIdentifier == normalizedBundleIdentifier
+                || audioBundleIdentifier.hasPrefix(normalizedBundleIdentifier + ".")
+        }
+    }
+}
+
+private enum AudioActivityClient {
+    static func currentSnapshot() -> AudioActivitySnapshot {
+        let processObjects = audioProcessObjects()
+        guard !processObjects.isEmpty else { return .empty }
+
+        var inputProcessIdentifiers: Set<pid_t> = []
+        var inputBundleIdentifiers: Set<String> = []
+        var outputProcessIdentifiers: Set<pid_t> = []
+        var outputBundleIdentifiers: Set<String> = []
+        for processObject in processObjects {
+            let isInputActive = isRunning(
+                processObject,
+                selector: kAudioProcessPropertyIsRunningInput
+            )
+            let isOutputActive = isRunning(
+                processObject,
+                selector: kAudioProcessPropertyIsRunningOutput
+            )
+            guard isInputActive || isOutputActive else { continue }
+            guard let processIdentifier = processIdentifier(processObject) else { continue }
+            let bundleIdentifier = NSRunningApplication(
+                processIdentifier: processIdentifier
+            )?.bundleIdentifier?.lowercased()
+
+            if isInputActive {
+                inputProcessIdentifiers.insert(processIdentifier)
+                if let bundleIdentifier {
+                    inputBundleIdentifiers.insert(bundleIdentifier)
+                }
+            }
+            if isOutputActive {
+                outputProcessIdentifiers.insert(processIdentifier)
+                if let bundleIdentifier {
+                    outputBundleIdentifiers.insert(bundleIdentifier)
+                }
+            }
+        }
+        return AudioActivitySnapshot(
+            inputProcessIdentifiers: inputProcessIdentifiers,
+            inputBundleIdentifiers: inputBundleIdentifiers,
+            outputProcessIdentifiers: outputProcessIdentifiers,
+            outputBundleIdentifiers: outputBundleIdentifiers
+        )
+    }
+
+    private static func audioProcessObjects() -> [AudioObjectID] {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyProcessObjectList,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var dataSize: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &dataSize
+        ) == noErr else {
+            return []
+        }
+
+        let count = Int(dataSize) / MemoryLayout<AudioObjectID>.size
+        guard count > 0 else { return [] }
+        var processObjects = Array(
+            repeating: AudioObjectID(kAudioObjectUnknown),
+            count: count
+        )
+        let status = processObjects.withUnsafeMutableBytes { buffer in
+            AudioObjectGetPropertyData(
+                AudioObjectID(kAudioObjectSystemObject),
+                &address,
+                0,
+                nil,
+                &dataSize,
+                buffer.baseAddress!
+            )
+        }
+        return status == noErr ? processObjects : []
+    }
+
+    private static func processIdentifier(_ processObject: AudioObjectID) -> pid_t? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioProcessPropertyPID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value: pid_t = 0
+        var dataSize = UInt32(MemoryLayout<pid_t>.size)
+        guard AudioObjectGetPropertyData(
+            processObject,
+            &address,
+            0,
+            nil,
+            &dataSize,
+            &value
+        ) == noErr, value > 0 else {
+            return nil
+        }
+        return value
+    }
+
+    private static func isRunning(
+        _ processObject: AudioObjectID,
+        selector: AudioObjectPropertySelector
+    ) -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value: UInt32 = 0
+        var dataSize = UInt32(MemoryLayout<UInt32>.size)
+        return AudioObjectGetPropertyData(
+            processObject,
+            &address,
+            0,
+            nil,
+            &dataSize,
+            &value
+        ) == noErr && value != 0
+    }
+}
+
 private enum SwitcherItem {
     case window(AeroWindow)
     case application(RunningApp)
@@ -192,6 +400,29 @@ private enum SwitcherItem {
     }
 }
 
+private enum WindowControlAction {
+    case moveWindowToWorkspace(String)
+    case moveApplicationToWorkspace(String)
+    case toggleFloating
+    case toggleFullscreen
+    case toggleTilesAccordion
+    case toggleOrientation
+    case balanceWorkspace
+    case resetWorkspace
+    case moveToMonitor(String)
+    case swap(String)
+    case join(String)
+    case resize(dimension: String, delta: Int)
+}
+
+private struct WindowControlRequest {
+    let action: WindowControlAction
+    let targetWindowID: Int
+    let targetWorkspace: String
+    let applicationWindowIDs: [Int]
+    let keepsPanelOpen: Bool
+}
+
 private enum AeroSpaceClient {
     private static let executablePaths = [
         "/opt/homebrew/bin/aerospace",
@@ -203,7 +434,20 @@ private enum AeroSpaceClient {
     }
 
     static func allWindows() throws -> [AeroWindow] {
-        let format = "%{window-id} %{app-name} %{app-bundle-id} %{app-pid} %{workspace} %{window-title}"
+        let format = [
+            "%{window-id}",
+            "%{app-name}",
+            "%{app-bundle-id}",
+            "%{app-pid}",
+            "%{workspace}",
+            "%{window-title}",
+            "%{window-is-fullscreen}",
+            "%{window-layout}",
+            "%{workspace-is-focused}",
+            "%{workspace-is-visible}",
+            "%{monitor-id}",
+            "%{monitor-name}",
+        ].joined(separator: " ")
         let data = try run(["list-windows", "--all", "--json", "--format", format])
         let windows = try JSONDecoder().decode([AeroWindow].self, from: data)
         return excludingStaleUntitledWindows(windows)
@@ -290,41 +534,56 @@ private enum AeroSpaceClient {
         }
     }
 
-    static func moveFocusedApplication(to workspace: String) throws {
-        let bundleIDData = try run([
-            "list-windows", "--focused", "--format", "%{app-bundle-id}",
-        ])
-        let bundleID = String(data: bundleIDData, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !bundleID.isEmpty else {
-            throw NSError(
-                domain: "AeroSpaceWindowSwitcher",
-                code: 2,
-                userInfo: [NSLocalizedDescriptionKey: "No focused AeroSpace window was found"]
-            )
-        }
-
-        let windowIDData = try run([
-            "list-windows", "--monitor", "all", "--app-bundle-id", bundleID,
-            "--format", "%{window-id}",
-        ])
-        let windowIDs = String(data: windowIDData, encoding: .utf8)?
-            .split(whereSeparator: \.isNewline)
-            .compactMap { Int($0) } ?? []
-        guard !windowIDs.isEmpty else {
-            throw NSError(
-                domain: "AeroSpaceWindowSwitcher",
-                code: 3,
-                userInfo: [NSLocalizedDescriptionKey: "The focused app has no AeroSpace windows"]
-            )
-        }
-
-        for windowID in windowIDs {
+    static func perform(_ request: WindowControlRequest) throws {
+        let windowID = String(request.targetWindowID)
+        switch request.action {
+        case .moveWindowToWorkspace(let workspace):
             _ = try run([
-                "move-node-to-workspace", "--window-id", String(windowID), workspace,
+                "move-node-to-workspace", "--focus-follows-window",
+                "--window-id", windowID, workspace,
+            ])
+        case .moveApplicationToWorkspace(let workspace):
+            let windowIDs = request.applicationWindowIDs.isEmpty
+                ? [request.targetWindowID]
+                : request.applicationWindowIDs
+            for applicationWindowID in windowIDs where applicationWindowID != request.targetWindowID {
+                _ = try run([
+                    "move-node-to-workspace", "--window-id",
+                    String(applicationWindowID), workspace,
+                ])
+            }
+            _ = try run([
+                "move-node-to-workspace", "--focus-follows-window",
+                "--window-id", windowID, workspace,
+            ])
+        case .toggleFloating:
+            _ = try run(["layout", "--window-id", windowID, "floating", "tiling"])
+        case .toggleFullscreen:
+            _ = try run(["fullscreen", "--window-id", windowID])
+        case .toggleTilesAccordion:
+            _ = try run(["layout", "--window-id", windowID, "tiles", "accordion"])
+        case .toggleOrientation:
+            _ = try run(["layout", "--window-id", windowID, "horizontal", "vertical"])
+        case .balanceWorkspace:
+            _ = try run(["balance-sizes", "--workspace", request.targetWorkspace])
+        case .resetWorkspace:
+            _ = try run(["flatten-workspace-tree", "--workspace", request.targetWorkspace])
+            _ = try run(["balance-sizes", "--workspace", request.targetWorkspace])
+        case .moveToMonitor(let direction):
+            _ = try run([
+                "move-node-to-monitor", "--focus-follows-window",
+                "--window-id", windowID, "--wrap-around", direction,
+            ])
+        case .swap(let direction):
+            _ = try run(["swap", "--window-id", windowID, direction])
+        case .join(let direction):
+            _ = try run(["join-with", "--window-id", windowID, direction])
+        case .resize(let dimension, let delta):
+            _ = try run([
+                "resize", "--window-id", windowID,
+                dimension, delta >= 0 ? "+\(delta)" : String(delta),
             ])
         }
-        _ = try run(["workspace", workspace])
     }
 
     private static func run(_ arguments: [String]) throws -> Data {
@@ -365,19 +624,223 @@ private final class FlippedView: NSView {
     override var isFlipped: Bool { true }
 }
 
+private final class OverflowFadingScrollView: NSScrollView {
+    private let overflowMask = CAGradientLayer()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        overflowMask.startPoint = CGPoint(x: 0.5, y: 0)
+        overflowMask.endPoint = CGPoint(x: 0.5, y: 1)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layout() {
+        super.layout()
+        updateOverflowMask()
+    }
+
+    override func reflectScrolledClipView(_ clipView: NSClipView) {
+        super.reflectScrolledClipView(clipView)
+        updateOverflowMask()
+    }
+
+    private func updateOverflowMask() {
+        guard
+            let layer,
+            let documentView,
+            bounds.height > 0
+        else {
+            return
+        }
+
+        let viewportHeight = contentView.bounds.height
+        let maximumOffset = max(0, documentView.bounds.height - viewportHeight)
+        guard maximumOffset > 1 else {
+            layer.mask = nil
+            return
+        }
+
+        let currentOffset = contentView.bounds.origin.y
+        let canScrollAbove = currentOffset > 1
+        let canScrollBelow = currentOffset < maximumOffset - 1
+        let opaque = NSColor.white.cgColor
+        let transparent = NSColor.white.withAlphaComponent(0).cgColor
+        let fadeFraction = min(0.08, 12 / bounds.height)
+
+        // NSScrollView's backing layer starts at the visual bottom. Only fade an
+        // edge while more rows exist in that direction, preserving the clean
+        // no-scrollbar appearance without hiding that the list continues.
+        overflowMask.colors = [
+            canScrollBelow ? transparent : opaque,
+            opaque,
+            opaque,
+            canScrollAbove ? transparent : opaque,
+        ]
+        overflowMask.locations = [
+            0,
+            NSNumber(value: fadeFraction),
+            NSNumber(value: 1 - fadeFraction),
+            1,
+        ]
+        overflowMask.frame = bounds
+        layer.mask = overflowMask
+    }
+}
+
 private final class SwitcherPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 }
 
-private final class WorkspacePromptController {
-    var onSubmit: ((String) -> Void)?
+private final class WindowControlTile: NSControl {
+    var onPress: ((NSEvent.ModifierFlags) -> Void)?
+    var isHighlightedState = false {
+        didSet { updateAppearance() }
+    }
+
+    private var trackingAreaReference: NSTrackingArea?
+    private var isHovered = false
+
+    init(title: String, detail: String? = nil) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.cornerRadius = 9
+        layer?.cornerCurve = .continuous
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel([title, detail].compactMap { $0 }.joined(separator: ", "))
+
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 3
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
+        titleLabel.textColor = .white
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
+        stack.addArrangedSubview(titleLabel)
+
+        if let detail, !detail.isEmpty {
+            let detailLabel = NSTextField(labelWithString: detail)
+            detailLabel.font = NSFont.systemFont(ofSize: 10.5, weight: .regular)
+            detailLabel.textColor = NSColor.white.withAlphaComponent(0.46)
+            detailLabel.lineBreakMode = .byTruncatingTail
+            detailLabel.maximumNumberOfLines = 1
+            stack.addArrangedSubview(detailLabel)
+        }
+
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 50),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 11),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        updateAppearance()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaReference {
+            removeTrackingArea(trackingAreaReference)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeAlways, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingAreaReference = area
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        updateAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        updateAppearance()
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if bounds.contains(point) {
+            onPress?(event.modifierFlags)
+        }
+        updateAppearance()
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        onPress?([])
+        return true
+    }
+
+    private func updateAppearance() {
+        let background: NSColor
+        if isHighlightedState {
+            background = SwitcherStyle.accentColor.withAlphaComponent(0.24)
+        } else if isHovered {
+            background = NSColor.white.withAlphaComponent(0.12)
+        } else {
+            background = NSColor.white.withAlphaComponent(0.065)
+        }
+        layer?.backgroundColor = background.cgColor
+        layer?.borderWidth = isHighlightedState ? 1 : 0.5
+        layer?.borderColor = (isHighlightedState
+            ? SwitcherStyle.accentColor.withAlphaComponent(0.68)
+            : NSColor.white.withAlphaComponent(0.10)
+        ).cgColor
+    }
+}
+
+private final class WindowControlSurfaceView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 16
+        layer?.cornerCurve = .continuous
+        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.80).cgColor
+        layer?.borderWidth = 1
+        layer?.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+}
+
+private final class WindowControlPanelController {
+    private enum Mode {
+        case main
+        case arrange
+        case resize
+    }
+
+    var onCommand: ((WindowControlRequest) -> Void)?
 
     var isVisible: Bool { panel.isVisible }
 
     private let panel: SwitcherPanel
     private var localKeyMonitor: Any?
-    private let maximumVisibleWindows = 6
+    private var windows: [AeroWindow] = []
+    private var targetWindowID: Int?
+    private var mode: Mode = .main
+    private weak var targetScreen: NSScreen?
 
     init() {
         panel = SwitcherPanel(
@@ -388,23 +851,30 @@ private final class WorkspacePromptController {
         )
         panel.level = .screenSaver
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-        panel.backgroundColor = NSColor.black.withAlphaComponent(0.58)
+        panel.backgroundColor = .clear
         panel.isOpaque = false
-        panel.hasShadow = false
+        panel.hasShadow = true
         panel.animationBehavior = .none
-        panel.hidesOnDeactivate = false
-        panel.contentView = makeContentView(windows: [], focusedWindowID: nil)
+        panel.hidesOnDeactivate = true
+        rebuildContent()
     }
 
     func update(windows: [AeroWindow], focusedWindowID: Int?) {
-        panel.contentView = makeContentView(
-            windows: windows,
-            focusedWindowID: focusedWindowID
-        )
+        self.windows = windows
+        if !isVisible || targetWindowID == nil || targetWindow == nil {
+            targetWindowID = focusedWindowID
+        }
+        rebuildContent()
+        if isVisible, let targetScreen {
+            positionPanel(on: targetScreen)
+        }
     }
 
     func show(on screen: NSScreen) {
-        panel.setFrame(screen.frame, display: false)
+        targetScreen = screen
+        mode = .main
+        rebuildContent()
+        positionPanel(on: screen)
         startKeyMonitoring()
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
@@ -414,234 +884,447 @@ private final class WorkspacePromptController {
     func hide(deactivateApplication: Bool = true) {
         stopKeyMonitoring()
         panel.orderOut(nil)
+        mode = .main
         if deactivateApplication {
             NSApp.deactivate()
         }
     }
 
-    private func makeContentView(
-        windows: [AeroWindow],
-        focusedWindowID: Int?
-    ) -> NSView {
-        let container = NSView()
-        let focusedWindow = focusedWindowID.flatMap { focusedID in
-            windows.first { $0.windowID == focusedID }
+    private var targetWindow: AeroWindow? {
+        targetWindowID.flatMap { targetID in
+            windows.first { $0.windowID == targetID }
         }
-        let movingBundleID = focusedWindow?.appBundleID
-        let movingAppName = focusedWindow?.appName
-        let currentWorkspace = focusedWindow?.workspace
+    }
+
+    private var panelSize: NSSize {
+        switch mode {
+        case .main:
+            return NSSize(width: 820, height: 490)
+        case .arrange, .resize:
+            return NSSize(width: 720, height: 260)
+        }
+    }
+
+    private func positionPanel(on screen: NSScreen) {
+        let size = panelSize
+        let frame = screen.visibleFrame
+        panel.setFrame(NSRect(
+            x: frame.midX - size.width / 2,
+            y: frame.midY - size.height / 2,
+            width: size.width,
+            height: size.height
+        ), display: true)
+    }
+
+    private func rebuildContent() {
+        let container = NSView()
+        let surface = WindowControlSurfaceView()
+        surface.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(surface)
 
         let content = NSStackView()
         content.orientation = .vertical
-        content.alignment = .leading
-        content.spacing = 24
+        content.alignment = .width
+        content.spacing = 12
         content.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(content)
+        surface.addSubview(content)
 
-        let titleText = movingAppName.map {
-            localized("Move \($0) windows", "移动 \($0) 的窗口")
-        } ?? localized("Move app windows", "移动 App 窗口")
-        let title = NSTextField(labelWithString: titleText)
-        title.font = NSFont.monospacedSystemFont(ofSize: 16, weight: .medium)
-        title.textColor = .white
-        title.alignment = .left
-        content.addArrangedSubview(title)
-
-        let workspaceList = NSStackView()
-        workspaceList.orientation = .vertical
-        workspaceList.alignment = .leading
-        workspaceList.spacing = 9
-        workspaceList.translatesAutoresizingMaskIntoConstraints = false
-        for workspace in 1...9 {
-            let name = String(workspace)
-            let section = makeWorkspaceSection(
-                workspace: name,
-                windows: windows.filter { $0.workspace == name },
-                currentWorkspace: currentWorkspace,
-                focusedWindowID: focusedWindowID,
-                movingBundleID: movingBundleID
-            )
-            workspaceList.addArrangedSubview(section)
-            section.widthAnchor.constraint(equalTo: workspaceList.widthAnchor).isActive = true
+        addFullWidth(makeHeader(), to: content)
+        switch mode {
+        case .main:
+            buildMainContent(in: content)
+        case .arrange:
+            buildArrangeContent(in: content)
+        case .resize:
+            buildResizeContent(in: content)
         }
-        content.addArrangedSubview(workspaceList)
-
-        let legend = NSTextField(labelWithString: localized(
-            "● current workspace   → focused window   · windows to move   1–9 move   esc cancel",
-            "● 当前 workspace   → 当前窗口   · 待移动窗口   1–9 移动   esc 取消"
-        ))
-        legend.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
-        legend.textColor = NSColor.white.withAlphaComponent(0.48)
-        legend.alignment = .left
-        content.addArrangedSubview(legend)
 
         NSLayoutConstraint.activate([
-            content.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-            content.centerYAnchor.constraint(equalTo: container.centerYAnchor, constant: -28),
-            content.widthAnchor.constraint(equalToConstant: 760),
-            content.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 56),
-            content.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -56),
-            workspaceList.widthAnchor.constraint(equalTo: content.widthAnchor),
+            surface.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            surface.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            surface.topAnchor.constraint(equalTo: container.topAnchor),
+            surface.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            content.leadingAnchor.constraint(equalTo: surface.leadingAnchor, constant: 24),
+            content.trailingAnchor.constraint(equalTo: surface.trailingAnchor, constant: -24),
+            content.topAnchor.constraint(equalTo: surface.topAnchor, constant: 22),
+            content.bottomAnchor.constraint(lessThanOrEqualTo: surface.bottomAnchor, constant: -18),
         ])
-        return container
+        panel.contentView = container
     }
 
-    private func makeWorkspaceSection(
-        workspace: String,
-        windows: [AeroWindow],
-        currentWorkspace: String?,
-        focusedWindowID: Int?,
-        movingBundleID: String?
-    ) -> NSView {
-        let section = NSStackView()
-        section.orientation = .vertical
-        section.alignment = .leading
-        section.spacing = 4
-        section.translatesAutoresizingMaskIntoConstraints = false
+    private func makeHeader() -> NSView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 4
 
-        let isCurrentWorkspace = workspace == currentWorkspace
-        let header = NSTextField(labelWithString: isCurrentWorkspace
-            ? "● \(workspace)"
-            : "  \(workspace)"
-        )
-        header.translatesAutoresizingMaskIntoConstraints = false
-        header.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
-        header.textColor = isCurrentWorkspace
-            ? SwitcherStyle.accentColor.withAlphaComponent(0.72)
-            : NSColor.white.withAlphaComponent(0.36)
-        header.alignment = .left
-        section.addArrangedSubview(header)
-        header.heightAnchor.constraint(equalToConstant: 24).isActive = true
-
-        let prioritizedWindows = windows.enumerated().sorted { left, right in
-            let leftPriority = windowPriority(
-                left.element,
-                focusedWindowID: focusedWindowID,
-                movingBundleID: movingBundleID
-            )
-            let rightPriority = windowPriority(
-                right.element,
-                focusedWindowID: focusedWindowID,
-                movingBundleID: movingBundleID
-            )
-            return leftPriority == rightPriority
-                ? left.offset < right.offset
-                : leftPriority < rightPriority
-        }.map(\.element)
-
-        let visibleWindows = prioritizedWindows.prefix(maximumVisibleWindows)
-        for window in visibleWindows {
-            let isFocused = window.windowID == focusedWindowID
-            let isMoving = !window.appBundleID.isEmpty
-                && window.appBundleID == movingBundleID
-            let title = window.windowTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-            let description = title.isEmpty || title == window.appName
-                ? nil
-                : title
-            let windowRow = makeWindowRow(
-                appName: window.appName,
-                windowTitle: description,
-                marker: isFocused ? "→" : (isMoving ? "·" : ""),
-                emphasized: isFocused,
-                isMoving: isMoving
-            )
-            section.addArrangedSubview(windowRow)
-            windowRow.widthAnchor.constraint(equalTo: section.widthAnchor).isActive = true
+        let titleText: String
+        if let window = targetWindow {
+            let windowTitle = window.windowTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            titleText = windowTitle.isEmpty || windowTitle == window.appName
+                ? window.appName
+                : "\(window.appName)  —  \(windowTitle)"
+        } else {
+            titleText = localized("No focused window", "没有当前窗口")
         }
+        let title = makeLabel(titleText, size: 16, weight: .semibold, alpha: 0.94)
+        title.lineBreakMode = .byTruncatingTail
+        title.maximumNumberOfLines = 1
+        stack.addArrangedSubview(title)
 
-        let hiddenCount = prioritizedWindows.count - visibleWindows.count
-        if hiddenCount > 0 {
-            let moreRow = makeWindowRow(
-                appName: "+\(hiddenCount)",
-                windowTitle: nil,
-                marker: "",
-                emphasized: false,
-                isMoving: false,
-                subdued: true
+        let metadata: String
+        if let window = targetWindow {
+            let layout = localizedLayout(window.windowLayout)
+            let appWindowCount = applicationWindows(for: window).count
+            metadata = [
+                workspaceDisplayName(window.workspace),
+                window.monitorName,
+                layout,
+                localized("\(appWindowCount) app windows", "当前 App \(appWindowCount) 个窗口"),
+            ].filter { !$0.isEmpty }.joined(separator: "  ·  ")
+        } else {
+            metadata = localized(
+                "Focus an AeroSpace window, then reopen this panel.",
+                "请先聚焦一个 AeroSpace 窗口，再重新打开面板。"
             )
-            section.addArrangedSubview(moreRow)
-            moreRow.widthAnchor.constraint(equalTo: section.widthAnchor).isActive = true
         }
-        return section
+        stack.addArrangedSubview(makeLabel(metadata, size: 11, weight: .regular, alpha: 0.48))
+        return stack
     }
 
-    private func makeWindowRow(
-        appName: String,
-        windowTitle: String?,
-        marker: String,
-        emphasized: Bool,
-        isMoving: Bool,
-        subdued: Bool = false
-    ) -> NSView {
-        let row = NSView()
-        row.translatesAutoresizingMaskIntoConstraints = false
+    private func buildMainContent(in content: NSStackView) {
+        addFullWidth(makeSectionTitle(localized("MOVE TO WORKSPACE", "移动到 WORKSPACE")), to: content)
 
-        let markerLabel = NSTextField(labelWithString: marker)
-        markerLabel.translatesAutoresizingMaskIntoConstraints = false
-        markerLabel.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .medium)
-        markerLabel.textColor = emphasized
-            ? .white
-            : SwitcherStyle.accentColor.withAlphaComponent(0.82)
-        markerLabel.alignment = .left
-        row.addSubview(markerLabel)
+        let workspaceGrid = verticalGrid()
+        for rowRange in [1...5, 6...10] {
+            let row = horizontalGrid()
+            for index in rowRange {
+                let workspace = String(index)
+                let key = index == 10 ? "0" : workspace
+                let count = windows.filter { $0.workspace == workspace }.count
+                let current = targetWindow?.workspace == workspace
+                let detail = [
+                    localized("\(count) windows", "\(count) 个窗口"),
+                    current ? localized("CURRENT", "当前") : nil,
+                ].compactMap { $0 }.joined(separator: " · ")
+                let tile = WindowControlTile(
+                    title: "\(key)  \(workspaceShortName(workspace))",
+                    detail: detail
+                )
+                tile.isHighlightedState = current
+                tile.onPress = { [weak self] modifiers in
+                    self?.moveToWorkspace(workspace, entireApplication: modifiers.contains(.shift))
+                }
+                row.addArrangedSubview(tile)
+            }
+            workspaceGrid.addArrangedSubview(row)
+        }
+        addFullWidth(workspaceGrid, to: content)
 
-        let nameLabel = NSTextField(labelWithString: "")
-        nameLabel.translatesAutoresizingMaskIntoConstraints = false
-        nameLabel.alignment = .left
-        let appColor = subdued
-            ? NSColor.white.withAlphaComponent(0.30)
-            : (emphasized
-                ? .white
-                : (isMoving
-                    ? SwitcherStyle.accentColor.withAlphaComponent(0.88)
-                    : NSColor.white.withAlphaComponent(0.86)))
-        let attributedName = NSMutableAttributedString(
-            string: appName,
-            attributes: [
-                .font: NSFont.monospacedSystemFont(ofSize: 12.5, weight: .semibold),
-                .foregroundColor: appColor,
-            ]
-        )
-        if let windowTitle, !windowTitle.isEmpty {
-            attributedName.append(NSAttributedString(
-                string: "  —  \(windowTitle)",
-                attributes: [
-                    .font: NSFont.monospacedSystemFont(ofSize: 11.5, weight: .regular),
-                    .foregroundColor: NSColor.white.withAlphaComponent(0.38),
-                ]
+        addFullWidth(makeSectionTitle(localized("LAYOUT", "布局")), to: content)
+        let layoutGrid = verticalGrid()
+        let firstLayoutRow = horizontalGrid()
+        let isFloating = targetWindow?.windowLayout == "floating"
+        let isFullscreen = targetWindow?.isFullscreen == true
+        firstLayoutRow.addArrangedSubview(actionTile(
+            title: localized("F  FLOAT / TILE", "F  浮动 / 平铺"),
+            detail: isFloating ? localized("CURRENT: FLOATING", "当前：浮动") : localized("CURRENT: TILING", "当前：平铺"),
+            highlighted: isFloating,
+            action: .toggleFloating
+        ))
+        firstLayoutRow.addArrangedSubview(actionTile(
+            title: localized("M  FULLSCREEN", "M  全屏"),
+            detail: isFullscreen ? localized("CURRENT: ON", "当前：开启") : localized("AEROSPACE FULLSCREEN", "AeroSpace 全屏"),
+            highlighted: isFullscreen,
+            action: .toggleFullscreen
+        ))
+        firstLayoutRow.addArrangedSubview(actionTile(
+            title: localized("T  TILES / ACCORDION", "T  TILES / ACCORDION"),
+            detail: localizedLayout(targetWindow?.windowLayout ?? ""),
+            action: .toggleTilesAccordion,
+            keepsPanelOpen: true
+        ))
+        layoutGrid.addArrangedSubview(firstLayoutRow)
+
+        let secondLayoutRow = horizontalGrid()
+        secondLayoutRow.addArrangedSubview(actionTile(
+            title: localized("O  ORIENTATION", "O  横向 / 纵向"),
+            detail: localizedOrientation(targetWindow?.windowLayout ?? ""),
+            action: .toggleOrientation,
+            keepsPanelOpen: true
+        ))
+        secondLayoutRow.addArrangedSubview(actionTile(
+            title: localized("B  BALANCE", "B  均分窗口"),
+            detail: localized("Equalize current workspace", "均分当前 workspace"),
+            action: .balanceWorkspace
+        ))
+        secondLayoutRow.addArrangedSubview(actionTile(
+            title: localized("R  RESET", "R  重置布局"),
+            detail: localized("Flatten and balance", "扁平化并均分"),
+            action: .resetWorkspace
+        ))
+        layoutGrid.addArrangedSubview(secondLayoutRow)
+        addFullWidth(layoutGrid, to: content)
+
+        addFullWidth(makeSectionTitle(localized("POSITION & ARRANGE", "位置与整理")), to: content)
+        let positionRow = horizontalGrid()
+        positionRow.addArrangedSubview(actionTile(
+            title: localized("←  PREVIOUS DISPLAY", "←  上一个显示器"),
+            detail: localized("Move window and follow", "移动窗口并跟随"),
+            action: .moveToMonitor("prev")
+        ))
+        positionRow.addArrangedSubview(actionTile(
+            title: localized("→  NEXT DISPLAY", "→  下一个显示器"),
+            detail: localized("Move window and follow", "移动窗口并跟随"),
+            action: .moveToMonitor("next")
+        ))
+        positionRow.addArrangedSubview(modeTile(
+            title: localized("A  ARRANGE", "A  排列模式"),
+            detail: localized("Swap or group windows", "交换或编组窗口"),
+            mode: .arrange
+        ))
+        positionRow.addArrangedSubview(modeTile(
+            title: localized("Z  RESIZE", "Z  缩放模式"),
+            detail: localized("Coarse and fine sizing", "粗调与精调尺寸"),
+            mode: .resize
+        ))
+        addFullWidth(positionRow, to: content)
+
+        addFullWidth(makeFooter(localized(
+            "1–0 current window   ⇧1–0 entire app   click actions   esc close",
+            "1–0 当前窗口   ⇧1–0 当前 App 全部窗口   点击也可操作   esc 关闭"
+        )), to: content)
+    }
+
+    private func buildArrangeContent(in content: NSStackView) {
+        addFullWidth(makeSectionTitle(localized(
+            "ARRANGE · H/J/K/L SWAP · SHIFT GROUP",
+            "排列 · H/J/K/L 交换 · SHIFT 编组"
+        )), to: content)
+        let swapRow = horizontalGrid()
+        for (key, direction, chinese) in [
+            ("H", "left", "左"), ("J", "down", "下"),
+            ("K", "up", "上"), ("L", "right", "右"),
+        ] {
+            swapRow.addArrangedSubview(actionTile(
+                title: localized("\(key)  SWAP \(direction.uppercased())", "\(key)  向\(chinese)交换"),
+                detail: localized("Shift: group", "Shift：编组"),
+                action: .swap(direction),
+                keepsPanelOpen: true,
+                shiftedAction: .join(direction)
             ))
         }
-        nameLabel.attributedStringValue = attributedName
-        nameLabel.lineBreakMode = .byTruncatingTail
-        nameLabel.maximumNumberOfLines = 1
-        nameLabel.toolTip = windowTitle.map { "\(appName) — \($0)" } ?? appName
-        nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        row.addSubview(nameLabel)
+        addFullWidth(swapRow, to: content)
 
-        NSLayoutConstraint.activate([
-            row.heightAnchor.constraint(equalToConstant: 18),
-            markerLabel.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 9),
-            markerLabel.widthAnchor.constraint(equalToConstant: 20),
-            markerLabel.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            nameLabel.leadingAnchor.constraint(equalTo: markerLabel.trailingAnchor, constant: 6),
-            nameLabel.trailingAnchor.constraint(equalTo: row.trailingAnchor),
-            nameLabel.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-        ])
+        let utilityRow = horizontalGrid()
+        utilityRow.addArrangedSubview(actionTile(
+            title: localized("R  RESET WORKSPACE", "R  重置 WORKSPACE"),
+            detail: localized("Flatten and balance", "扁平化并均分"),
+            action: .resetWorkspace
+        ))
+        utilityRow.addArrangedSubview(modeTile(
+            title: localized("↩  MAIN PANEL", "↩  返回主面板"),
+            detail: localized("Press Return", "按 Return"),
+            mode: .main
+        ))
+        addFullWidth(utilityRow, to: content)
+        addFullWidth(makeFooter(localized(
+            "Repeat H/J/K/L to arrange   return main panel   esc close",
+            "可连续按 H/J/K/L 整理   Return 返回主面板   esc 关闭"
+        )), to: content)
+    }
+
+    private func buildResizeContent(in content: NSStackView) {
+        addFullWidth(makeSectionTitle(localized(
+            "RESIZE · 50 PT · HOLD SHIFT FOR 10 PT",
+            "缩放 · 每次 50 PT · 按住 SHIFT 微调 10 PT"
+        )), to: content)
+        let resizeRow = horizontalGrid()
+        for (key, dimension, delta, label) in [
+            ("H", "width", -50, localized("NARROWER", "减小宽度")),
+            ("L", "width", 50, localized("WIDER", "增加宽度")),
+            ("K", "height", -50, localized("SHORTER", "减小高度")),
+            ("J", "height", 50, localized("TALLER", "增加高度")),
+        ] {
+            resizeRow.addArrangedSubview(actionTile(
+                title: "\(key)  \(label)",
+                detail: localized("50 pt · Shift 10 pt", "50 pt · Shift 10 pt"),
+                action: .resize(dimension: dimension, delta: delta),
+                keepsPanelOpen: true
+            ))
+        }
+        addFullWidth(resizeRow, to: content)
+
+        let mainRow = horizontalGrid()
+        mainRow.addArrangedSubview(actionTile(
+            title: localized("B  BALANCE", "B  均分窗口"),
+            detail: localized("Reset window proportions", "恢复均匀比例"),
+            action: .balanceWorkspace
+        ))
+        mainRow.addArrangedSubview(modeTile(
+            title: localized("↩  MAIN PANEL", "↩  返回主面板"),
+            detail: localized("Press Return", "按 Return"),
+            mode: .main
+        ))
+        addFullWidth(mainRow, to: content)
+        addFullWidth(makeFooter(localized(
+            "Keys repeat while held   return main panel   esc close",
+            "按住按键可连续调整   Return 返回主面板   esc 关闭"
+        )), to: content)
+    }
+
+    private func actionTile(
+        title: String,
+        detail: String,
+        highlighted: Bool = false,
+        action: WindowControlAction,
+        keepsPanelOpen: Bool = false,
+        shiftedAction: WindowControlAction? = nil
+    ) -> WindowControlTile {
+        let tile = WindowControlTile(title: title, detail: detail)
+        tile.isHighlightedState = highlighted
+        tile.onPress = { [weak self] modifiers in
+            let selectedAction = modifiers.contains(.shift)
+                ? (shiftedAction ?? action)
+                : action
+            self?.perform(selectedAction, keepsPanelOpen: keepsPanelOpen)
+        }
+        return tile
+    }
+
+    private func modeTile(title: String, detail: String, mode: Mode) -> WindowControlTile {
+        let tile = WindowControlTile(title: title, detail: detail)
+        tile.onPress = { [weak self] _ in
+            self?.mode = mode
+            self?.rebuildContent()
+            if let screen = self?.targetScreen {
+                self?.positionPanel(on: screen)
+            }
+        }
+        return tile
+    }
+
+    private func moveToWorkspace(_ workspace: String, entireApplication: Bool) {
+        perform(
+            entireApplication
+                ? .moveApplicationToWorkspace(workspace)
+                : .moveWindowToWorkspace(workspace),
+            keepsPanelOpen: false
+        )
+    }
+
+    private func perform(_ action: WindowControlAction, keepsPanelOpen: Bool) {
+        guard let window = targetWindow else {
+            NSSound.beep()
+            return
+        }
+        let request = WindowControlRequest(
+            action: action,
+            targetWindowID: window.windowID,
+            targetWorkspace: window.workspace,
+            applicationWindowIDs: applicationWindows(for: window).map(\.windowID),
+            keepsPanelOpen: keepsPanelOpen
+        )
+        if !keepsPanelOpen {
+            hide()
+        }
+        onCommand?(request)
+    }
+
+    private func applicationWindows(for window: AeroWindow) -> [AeroWindow] {
+        windows.filter {
+            !window.appBundleID.isEmpty
+                ? $0.appBundleID == window.appBundleID
+                : $0.appPID == window.appPID
+        }
+    }
+
+    private func addFullWidth(_ view: NSView, to stack: NSStackView) {
+        stack.addArrangedSubview(view)
+        view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+    }
+
+    private func horizontalGrid() -> NSStackView {
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.distribution = .fillEqually
+        row.spacing = 8
         return row
     }
 
-    private func windowPriority(
-        _ window: AeroWindow,
-        focusedWindowID: Int?,
-        movingBundleID: String?
-    ) -> Int {
-        if window.windowID == focusedWindowID {
-            return 0
+    private func verticalGrid() -> NSStackView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .width
+        stack.spacing = 8
+        return stack
+    }
+
+    private func makeSectionTitle(_ text: String) -> NSTextField {
+        makeLabel(text, size: 9.5, weight: .semibold, alpha: 0.34)
+    }
+
+    private func makeFooter(_ text: String) -> NSTextField {
+        let label = makeLabel(text, size: 10.5, weight: .regular, alpha: 0.38)
+        label.alignment = .center
+        return label
+    }
+
+    private func makeLabel(
+        _ text: String,
+        size: CGFloat,
+        weight: NSFont.Weight,
+        alpha: CGFloat
+    ) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = NSFont.systemFont(ofSize: size, weight: weight)
+        label.textColor = NSColor.white.withAlphaComponent(alpha)
+        return label
+    }
+
+    private func workspaceShortName(_ workspace: String) -> String {
+        switch workspace {
+        case "1": return localized("Media", "媒体会议")
+        case "2": return localized("Browse", "浏览资料")
+        case "3": return localized("Temp", "临时预览")
+        case "4": return localized("Code", "Codex 编辑器")
+        case "5": return localized("Terminal", "终端 Agent")
+        case "6": return localized("Dev Tools", "开发辅助")
+        case "7": return localized("Content", "设计内容")
+        case "8": return localized("Comms", "沟通")
+        case "9": return localized("AI", "AI 研究")
+        case "10": return localized("Ambient", "氛围空屏")
+        default: return workspace
         }
-        if !window.appBundleID.isEmpty && window.appBundleID == movingBundleID {
-            return 1
+    }
+
+    private func workspaceDisplayName(_ workspace: String) -> String {
+        localized("Workspace \(workspace)", "Workspace \(workspace)")
+            + " · " + workspaceShortName(workspace)
+    }
+
+    private func localizedLayout(_ layout: String) -> String {
+        if layout == "floating" {
+            return localized("FLOATING", "浮动")
         }
-        return 2
+        if layout.contains("accordion") {
+            return localized("ACCORDION", "手风琴")
+        }
+        if layout.contains("tiles") {
+            return localized("TILES", "平铺")
+        }
+        return layout.uppercased()
+    }
+
+    private func localizedOrientation(_ layout: String) -> String {
+        if layout.hasPrefix("h_") {
+            return localized("CURRENT: HORIZONTAL", "当前：横向")
+        }
+        if layout.hasPrefix("v_") {
+            return localized("CURRENT: VERTICAL", "当前：纵向")
+        }
+        return localized("Horizontal / vertical", "横向 / 纵向")
     }
 
     private func startKeyMonitoring() {
@@ -653,14 +1336,90 @@ private final class WorkspacePromptController {
                 self.hide()
                 return nil
             }
-            if let character = event.charactersIgnoringModifiers?.first,
-               "123456789".contains(character) {
-                let workspace = String(character)
-                self.hide()
-                self.onSubmit?(workspace)
+            if self.mode != .main && (event.keyCode == 36 || event.keyCode == 51) {
+                self.mode = .main
+                self.rebuildContent()
+                if let screen = self.targetScreen {
+                    self.positionPanel(on: screen)
+                }
                 return nil
             }
-            return event
+            if self.mode != .resize && event.isARepeat {
+                return nil
+            }
+            self.handleKey(event)
+            return nil
+        }
+    }
+
+    private func handleKey(_ event: NSEvent) {
+        let character = event.charactersIgnoringModifiers?.lowercased().first
+        let shift = event.modifierFlags.contains(.shift)
+
+        switch mode {
+        case .main:
+            if let character, "1234567890".contains(character) {
+                moveToWorkspace(
+                    character == "0" ? "10" : String(character),
+                    entireApplication: shift
+                )
+                return
+            }
+            if event.keyCode == 123 {
+                perform(.moveToMonitor("prev"), keepsPanelOpen: false)
+                return
+            }
+            if event.keyCode == 124 {
+                perform(.moveToMonitor("next"), keepsPanelOpen: false)
+                return
+            }
+            switch character {
+            case "f": perform(.toggleFloating, keepsPanelOpen: false)
+            case "m": perform(.toggleFullscreen, keepsPanelOpen: false)
+            case "t": perform(.toggleTilesAccordion, keepsPanelOpen: true)
+            case "o": perform(.toggleOrientation, keepsPanelOpen: true)
+            case "b": perform(.balanceWorkspace, keepsPanelOpen: false)
+            case "r": perform(.resetWorkspace, keepsPanelOpen: false)
+            case "a":
+                mode = .arrange
+                rebuildContent()
+                if let targetScreen { positionPanel(on: targetScreen) }
+            case "z":
+                mode = .resize
+                rebuildContent()
+                if let targetScreen { positionPanel(on: targetScreen) }
+            default: NSSound.beep()
+            }
+        case .arrange:
+            guard let direction = direction(for: character) else {
+                if character == "r" {
+                    perform(.resetWorkspace, keepsPanelOpen: false)
+                } else {
+                    NSSound.beep()
+                }
+                return
+            }
+            perform(shift ? .join(direction) : .swap(direction), keepsPanelOpen: true)
+        case .resize:
+            let fineAmount = shift ? 10 : 50
+            switch character {
+            case "h": perform(.resize(dimension: "width", delta: -fineAmount), keepsPanelOpen: true)
+            case "l": perform(.resize(dimension: "width", delta: fineAmount), keepsPanelOpen: true)
+            case "k": perform(.resize(dimension: "height", delta: -fineAmount), keepsPanelOpen: true)
+            case "j": perform(.resize(dimension: "height", delta: fineAmount), keepsPanelOpen: true)
+            case "b": perform(.balanceWorkspace, keepsPanelOpen: false)
+            default: NSSound.beep()
+            }
+        }
+    }
+
+    private func direction(for character: Character?) -> String? {
+        switch character {
+        case "h": return "left"
+        case "j": return "down"
+        case "k": return "up"
+        case "l": return "right"
+        default: return nil
         }
     }
 
@@ -1167,7 +1926,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var cycleObserver: NSObjectProtocol?
     private var forwardSignalSource: DispatchSourceSignal?
     private var reverseSignalSource: DispatchSourceSignal?
-    private var workspacePromptSignalSource: DispatchSourceSignal?
+    private var windowControlSignalSource: DispatchSourceSignal?
     private var commandTabEventTap: CFMachPort?
     private var commandTabRunLoopSource: CFRunLoopSource?
     private var commandTabRetryTimer: Timer?
@@ -1177,6 +1936,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var targetScreen: NSScreen?
     private var iconCache: [String: NSImage] = [:]
     private var dockBadgeSnapshot = DockBadgeSnapshot.empty
+    private var audioActivitySnapshot = AudioActivitySnapshot.empty
     private var allWindows: [AeroWindow] = []
     private var windowlessApps: [RunningApp] = []
     private var orderedItems: [SwitcherItem] = []
@@ -1186,6 +1946,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var focusedWindowID: Int?
     private var focusedApplicationPID: pid_t?
     private var pendingCycleDelta = 0
+    private var pendingDirectSelectionIndex: Int?
     private var commitWhenLoaded = false
     private var trackedReleaseModifier: NSEvent.ModifierFlags?
     private var launchDirection = 1
@@ -1193,7 +1954,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var isLoaded = false
     private var isRefreshing = false
     private var loadGeneration = 0
-    private var workspacePromptController: WorkspacePromptController?
+    private var windowControlPanelController: WindowControlPanelController?
+    private let windowControlQueue = DispatchQueue(
+        label: "io.github.tovifun.aerospace-companion.window-control",
+        qos: .userInteractive
+    )
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let invokedByShortcut = CommandLine.arguments.contains("--forward")
@@ -1218,7 +1983,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
         startSignalHandling()
         startCommandTabInterception()
-        prepareWorkspacePrompt()
+        prepareWindowControlPanel()
         writeDaemonPID()
         cycleObserver = DistributedNotificationCenter.default().addObserver(
             forName: cycleNotificationName,
@@ -1257,8 +2022,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         forwardSignalSource?.cancel()
         reverseSignalSource?.cancel()
-        workspacePromptSignalSource?.cancel()
-        workspacePromptController?.hide(deactivateApplication: false)
+        windowControlSignalSource?.cancel()
+        windowControlPanelController?.hide(deactivateApplication: false)
         if singletonLockFileDescriptor >= 0 {
             unlink(daemonPIDPath)
             flock(singletonLockFileDescriptor, LOCK_UN)
@@ -1279,6 +2044,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                 let focusedWindowID = AeroSpaceClient.focusedWindowID()
                 let windows = try AeroSpaceClient.allWindows()
                 let dockBadgeSnapshot = DockBadgeClient.currentSnapshot()
+                let audioActivitySnapshot = AudioActivityClient.currentSnapshot()
                 DispatchQueue.main.async {
                     guard let self, self.loadGeneration == generation else { return }
                     let previousSelectionKey = preserveSelection
@@ -1286,6 +2052,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                         : nil
                     self.focusedWindowID = focusedWindowID
                     self.dockBadgeSnapshot = dockBadgeSnapshot
+                    self.audioActivitySnapshot = audioActivitySnapshot
                     self.allWindows = windows
                     self.windowlessApps = self.runningAppsWithoutWindows(excluding: windows)
                     self.warmIconCache()
@@ -1296,7 +2063,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                         + self.windowlessApps.map(SwitcherItem.application)
                     self.isLoaded = true
                     self.isRefreshing = false
-                    self.updateWorkspacePromptIfVisible()
+                    self.updateWindowControlPanelIfVisible()
                     guard !self.orderedItems.isEmpty else {
                         if presentErrors {
                             self.showError("No windows or applications are currently available.")
@@ -1304,7 +2071,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                         return
                     }
                     self.refreshContent()
-                    if preserveSelection {
+                    let pendingDirectSelectionIndex = self.pendingDirectSelectionIndex
+                    self.pendingDirectSelectionIndex = nil
+                    if let pendingDirectSelectionIndex,
+                       self.orderedItems.indices.contains(pendingDirectSelectionIndex) {
+                        self.pendingCycleDelta = 0
+                        self.setSelectedIndex(pendingDirectSelectionIndex)
+                    } else if preserveSelection {
                         let preservedIndex = previousSelectionKey.flatMap { key in
                             self.orderedItems.firstIndex { $0.key == key }
                         } ?? fallbackSelectionIndex ?? 0
@@ -1582,7 +2355,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             tint.bottomAnchor.constraint(equalTo: glass.bottomAnchor),
         ])
 
-        let scrollView = NSScrollView()
+        let scrollView = OverflowFadingScrollView()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = false
@@ -1710,7 +2483,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         stack.orientation = .vertical
         stack.alignment = .width
         stack.spacing = SwitcherStyle.rowSpacing
-        stack.addArrangedSubview(makeGroupHeader("WORKSPACE \(group.workspace)"))
+        stack.addArrangedSubview(makeGroupHeader(
+            title: workspaceHeaderTitle(group.workspace),
+            metadata: workspaceHeaderMetadata(group)
+        ))
 
         for window in group.windows {
             let row = makeWindowRow(window)
@@ -1725,7 +2501,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         stack.orientation = .vertical
         stack.alignment = .width
         stack.spacing = SwitcherStyle.rowSpacing
-        stack.addArrangedSubview(makeGroupHeader("OTHER APPS"))
+        let appCount = windowlessApps.count
+        stack.addArrangedSubview(makeGroupHeader(
+            title: localized("OTHER APPS", "其他 APP"),
+            metadata: localized(
+                appCount == 1 ? "1 APP" : "\(appCount) APPS",
+                "\(appCount) 个"
+            )
+        ))
 
         for app in windowlessApps {
             let row = makeApplicationRow(app)
@@ -1735,39 +2518,129 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         return stack
     }
 
-    private func makeGroupHeader(_ text: String) -> NSView {
+    private func makeGroupHeader(title: String, metadata: String?) -> NSView {
         let header = NSView()
         header.translatesAutoresizingMaskIntoConstraints = false
-        let label = textLabel(
-            text,
+        let titleLabel = textLabel(
+            title,
             size: 10,
             weight: .semibold,
             color: .tertiaryLabelColor
         )
-        header.addSubview(label)
-        NSLayoutConstraint.activate([
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        header.addSubview(titleLabel)
+
+        var constraints = [
             header.heightAnchor.constraint(equalToConstant: SwitcherStyle.groupHeaderHeight),
-            label.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 10),
-            label.bottomAnchor.constraint(equalTo: header.bottomAnchor, constant: -6),
-        ])
+            titleLabel.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 10),
+            titleLabel.bottomAnchor.constraint(equalTo: header.bottomAnchor, constant: -6),
+        ]
+        if let metadata, !metadata.isEmpty {
+            let metadataLabel = textLabel(
+                metadata,
+                size: 9,
+                weight: .medium,
+                color: .tertiaryLabelColor
+            )
+            metadataLabel.lineBreakMode = .byTruncatingMiddle
+            metadataLabel.maximumNumberOfLines = 1
+            metadataLabel.alignment = .right
+            metadataLabel.toolTip = metadata
+            header.addSubview(metadataLabel)
+            constraints.append(contentsOf: [
+                titleLabel.trailingAnchor.constraint(
+                    lessThanOrEqualTo: metadataLabel.leadingAnchor,
+                    constant: -10
+                ),
+                metadataLabel.trailingAnchor.constraint(
+                    equalTo: header.trailingAnchor,
+                    constant: -10
+                ),
+                metadataLabel.bottomAnchor.constraint(equalTo: titleLabel.bottomAnchor),
+            ])
+        } else {
+            constraints.append(
+                titleLabel.trailingAnchor.constraint(
+                    lessThanOrEqualTo: header.trailingAnchor,
+                    constant: -10
+                )
+            )
+        }
+        NSLayoutConstraint.activate(constraints)
         return header
+    }
+
+    private func workspaceHeaderTitle(_ workspace: String) -> String {
+        let role: String?
+        switch workspace {
+        case "1": role = localized("MEDIA & CALLS", "媒体会议")
+        case "2": role = localized("BROWSING & REFERENCE", "浏览资料")
+        case "3": role = localized("TEMPORARY & PREVIEW", "临时预览")
+        case "4": role = localized("CODE & EDITORS", "Codex 与编辑器")
+        case "5": role = localized("TERMINALS & AGENTS", "终端与 Agent")
+        case "6": role = localized("GIT, DATA & API", "Git、数据库与 API")
+        case "7": role = localized("DESIGN & CONTENT", "设计与内容")
+        case "8": role = localized("COMMUNICATION", "沟通")
+        case "9": role = localized("AI & RESEARCH", "AI 研究")
+        case "10": role = localized("AMBIENT", "氛围空屏")
+        default: role = nil
+        }
+        return role.map { "\(workspace) · \($0)" }
+            ?? localized("WORKSPACE \(workspace)", "WORKSPACE \(workspace)")
+    }
+
+    private func workspaceHeaderMetadata(_ group: WorkspaceGroup) -> String {
+        let monitorName = group.monitorName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        var parts = [
+            monitorName.isEmpty
+                ? localized("DISPLAY \(group.monitorID)", "显示器 \(group.monitorID)")
+                : monitorName,
+        ]
+        if group.isFocused {
+            parts.append(localized("CURRENT", "当前"))
+        } else if group.isVisible {
+            parts.append(localized("VISIBLE", "可见"))
+        }
+        let count = group.windows.count
+        parts.append(localized(
+            count == 1 ? "1 WINDOW" : "\(count) WINDOWS",
+            "\(count) 个"
+        ))
+        return parts.joined(separator: " · ")
     }
 
     private func makeWindowRow(_ window: AeroWindow) -> NSView {
         let row = ActionRow()
         row.translatesAutoresizingMaskIntoConstraints = false
         let fallbackTitle = window.windowTitle.isEmpty ? "Untitled Window" : window.windowTitle
-        row.setAccessibilityLabel("\(window.appName), \(fallbackTitle)")
         let item = SwitcherItem.window(window)
+        let shortcutNumber = commandSelectionShortcutNumber(for: item)
+        let isCurrentWindow = window.windowID == focusedWindowID
+        row.setAccessibilityLabel(rowAccessibilityLabel(
+            appName: window.appName,
+            title: fallbackTitle,
+            bundleIdentifier: window.appBundleID,
+            processIdentifier: window.appPID,
+            window: window,
+            isCurrent: isCurrentWindow,
+            shortcutNumber: shortcutNumber
+        ))
         row.onClick = { [weak self] in self?.select(item) }
         row.onHoverChanged = { [weak self] isHovered in
             self?.updateHoveredItem(item.key, isHovered: isHovered)
         }
 
-        let icon = appIconView(
-            image: appIcon(bundleID: window.appBundleID),
+        let icon = appIconView(image: appIcon(bundleID: window.appBundleID))
+        let status = rowStatusView(
             bundleIdentifier: window.appBundleID,
-            appName: window.appName
+            appName: window.appName,
+            processIdentifier: window.appPID,
+            window: window,
+            isCurrent: isCurrentWindow,
+            commandShortcutNumber: shortcutNumber
         )
 
         let windowTitle = textLabel(
@@ -1780,19 +2653,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         windowTitle.maximumNumberOfLines = 1
         windowTitle.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        row.addSubview(icon)
-        row.addSubview(windowTitle)
-
-        NSLayoutConstraint.activate([
-            row.heightAnchor.constraint(equalToConstant: SwitcherStyle.rowHeight),
-            icon.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 9),
-            icon.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: SwitcherStyle.iconSize),
-            icon.heightAnchor.constraint(equalToConstant: SwitcherStyle.iconSize),
-            windowTitle.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 10),
-            windowTitle.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
-            windowTitle.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-        ])
+        layoutRowContent(row: row, icon: icon, title: windowTitle, status: status)
         row.registerLabels(primary: windowTitle)
         itemRows[item.key] = row
         return row
@@ -1801,17 +2662,31 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private func makeApplicationRow(_ app: RunningApp) -> NSView {
         let row = ActionRow()
         row.translatesAutoresizingMaskIntoConstraints = false
-        row.setAccessibilityLabel(app.appName)
         let item = SwitcherItem.application(app)
+        let shortcutNumber = commandSelectionShortcutNumber(for: item)
+        let isCurrentApplication = app.processIdentifier == focusedApplicationPID
+        row.setAccessibilityLabel(rowAccessibilityLabel(
+            appName: app.appName,
+            title: nil,
+            bundleIdentifier: app.bundleIdentifier,
+            processIdentifier: app.processIdentifier,
+            window: nil,
+            isCurrent: isCurrentApplication,
+            shortcutNumber: shortcutNumber
+        ))
         row.onClick = { [weak self] in self?.select(item) }
         row.onHoverChanged = { [weak self] isHovered in
             self?.updateHoveredItem(item.key, isHovered: isHovered)
         }
 
-        let icon = appIconView(
-            image: appIcon(for: app),
+        let icon = appIconView(image: appIcon(for: app))
+        let status = rowStatusView(
             bundleIdentifier: app.bundleIdentifier,
-            appName: app.appName
+            appName: app.appName,
+            processIdentifier: app.processIdentifier,
+            window: nil,
+            isCurrent: isCurrentApplication,
+            commandShortcutNumber: shortcutNumber
         )
 
         let appName = textLabel(
@@ -1824,22 +2699,75 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         appName.maximumNumberOfLines = 1
         appName.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        row.addSubview(icon)
-        row.addSubview(appName)
-
-        NSLayoutConstraint.activate([
-            row.heightAnchor.constraint(equalToConstant: SwitcherStyle.rowHeight),
-            icon.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 9),
-            icon.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: SwitcherStyle.iconSize),
-            icon.heightAnchor.constraint(equalToConstant: SwitcherStyle.iconSize),
-            appName.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 10),
-            appName.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
-            appName.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-        ])
+        layoutRowContent(row: row, icon: icon, title: appName, status: status)
         row.registerLabels(primary: appName)
         itemRows[item.key] = row
         return row
+    }
+
+    private func commandSelectionShortcutNumber(for item: SwitcherItem) -> Int? {
+        guard
+            trackedReleaseModifier == .command,
+            let index = orderedItems.firstIndex(where: { $0.key == item.key }),
+            index < 9
+        else {
+            return nil
+        }
+        return index + 1
+    }
+
+    private func rowAccessibilityLabel(
+        appName: String,
+        title: String?,
+        bundleIdentifier: String,
+        processIdentifier: pid_t,
+        window: AeroWindow?,
+        isCurrent: Bool,
+        shortcutNumber: Int?
+    ) -> String {
+        var parts = [appName]
+        if let title, !title.isEmpty {
+            parts.append(title)
+        }
+        if isCurrent {
+            parts.append(localized("Currently focused", "当前正在使用"))
+        }
+        if window?.isFullscreen == true {
+            parts.append(localized("Fullscreen", "全屏"))
+        } else if window?.windowLayout == "floating" {
+            parts.append(localized("Floating", "浮动"))
+        }
+        if NSRunningApplication(processIdentifier: processIdentifier)?.isHidden == true {
+            parts.append(localized("Hidden", "已隐藏"))
+        }
+        if audioActivitySnapshot.isInputActive(
+            processIdentifier: processIdentifier,
+            bundleIdentifier: bundleIdentifier
+        ) {
+            parts.append(localized("Using microphone", "正在使用麦克风"))
+        }
+        if audioActivitySnapshot.isOutputActive(
+            processIdentifier: processIdentifier,
+            bundleIdentifier: bundleIdentifier
+        ) {
+            parts.append(localized("Playing audio", "正在播放声音"))
+        }
+        if let badgeStatus = dockBadgeSnapshot.status(
+            bundleIdentifier: bundleIdentifier,
+            appName: appName
+        ) {
+            parts.append(localized(
+                "Notification badge \(badgeStatus.rawLabel)",
+                "通知 \(badgeStatus.rawLabel)"
+            ))
+        }
+        if let shortcutNumber {
+            parts.append(localized(
+                "Command-\(shortcutNumber) selects this item",
+                "Command-\(shortcutNumber) 选择此项"
+            ))
+        }
+        return parts.joined(separator: ", ")
     }
 
     private func workspaceGroups() -> [WorkspaceGroup] {
@@ -1856,7 +2784,22 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return left.localizedStandardCompare(right) == .orderedAscending
         }
-        return names.map { WorkspaceGroup(workspace: $0, windows: grouped[$0] ?? []) }
+        return names.compactMap { workspace in
+            guard
+                let windows = grouped[workspace],
+                let firstWindow = windows.first
+            else {
+                return nil
+            }
+            return WorkspaceGroup(
+                workspace: workspace,
+                isFocused: windows.contains(where: \.workspaceIsFocused),
+                isVisible: windows.contains(where: \.workspaceIsVisible),
+                monitorID: firstWindow.monitorID,
+                monitorName: firstWindow.monitorName,
+                windows: windows
+            )
+        }
     }
 
     private func prepareInitialSelection() {
@@ -1998,8 +2941,39 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                 quitSelectedApplication()
             }
             return true
+        case kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3,
+             kVK_ANSI_4, kVK_ANSI_5, kVK_ANSI_6,
+             kVK_ANSI_7, kVK_ANSI_8, kVK_ANSI_9:
+            guard !event.isARepeat,
+                  let index = commandSelectionIndex(for: Int(event.keyCode))
+            else {
+                return true
+            }
+            if isRefreshing {
+                pendingDirectSelectionIndex = index
+            } else if orderedItems.indices.contains(index) {
+                setSelectedIndex(index)
+            } else {
+                NSSound.beep()
+            }
+            return true
         default:
             return false
+        }
+    }
+
+    private func commandSelectionIndex(for keyCode: Int) -> Int? {
+        switch keyCode {
+        case kVK_ANSI_1: return 0
+        case kVK_ANSI_2: return 1
+        case kVK_ANSI_3: return 2
+        case kVK_ANSI_4: return 3
+        case kVK_ANSI_5: return 4
+        case kVK_ANSI_6: return 5
+        case kVK_ANSI_7: return 6
+        case kVK_ANSI_8: return 7
+        case kVK_ANSI_9: return 8
+        default: return nil
         }
     }
 
@@ -2182,6 +3156,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         trackedReleaseModifier = nil
         commitWhenLoaded = false
         pendingCycleDelta = 0
+        pendingDirectSelectionIndex = nil
         selectedIndex = nil
         hoveredItemKey = nil
         isRefreshing = false
@@ -2255,11 +3230,43 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         return NSImage(systemSymbolName: "app", accessibilityDescription: nil) ?? NSImage()
     }
 
-    private func appIconView(
-        image: NSImage,
-        bundleIdentifier: String,
-        appName: String
-    ) -> NSView {
+    private func layoutRowContent(
+        row: ActionRow,
+        icon: NSView,
+        title: NSTextField,
+        status: NSView?
+    ) {
+        row.addSubview(icon)
+        row.addSubview(title)
+
+        var constraints = [
+            row.heightAnchor.constraint(equalToConstant: SwitcherStyle.rowHeight),
+            icon.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 9),
+            icon.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: SwitcherStyle.iconSize),
+            icon.heightAnchor.constraint(equalToConstant: SwitcherStyle.iconSize),
+            title.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 10),
+            title.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+        ]
+        if let status {
+            row.addSubview(status)
+            constraints.append(contentsOf: [
+                title.trailingAnchor.constraint(
+                    lessThanOrEqualTo: status.leadingAnchor,
+                    constant: -10
+                ),
+                status.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -11),
+                status.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            ])
+        } else {
+            constraints.append(
+                title.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12)
+            )
+        }
+        NSLayoutConstraint.activate(constraints)
+    }
+
+    private func appIconView(image: NSImage) -> NSView {
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
 
@@ -2274,28 +3281,222 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             icon.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
 
-        if dockBadgeSnapshot.contains(
+        return container
+    }
+
+    private func rowStatusView(
+        bundleIdentifier: String,
+        appName: String,
+        processIdentifier: pid_t,
+        window: AeroWindow?,
+        isCurrent: Bool,
+        commandShortcutNumber: Int?
+    ) -> NSView? {
+        let badgeStatus = dockBadgeSnapshot.status(
             bundleIdentifier: bundleIdentifier,
             appName: appName
-        ) {
-            let badge = NSView()
-            badge.translatesAutoresizingMaskIntoConstraints = false
-            badge.wantsLayer = true
-            badge.layer?.backgroundColor = NSColor.systemRed.cgColor
-            badge.layer?.cornerRadius = 4.5
-            badge.layer?.borderWidth = 1
-            badge.layer?.borderColor = NSColor.white.withAlphaComponent(0.9).cgColor
-            badge.setAccessibilityElement(false)
-            container.addSubview(badge)
-            NSLayoutConstraint.activate([
-                badge.widthAnchor.constraint(equalToConstant: 9),
-                badge.heightAnchor.constraint(equalToConstant: 9),
-                badge.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: 1),
-                badge.topAnchor.constraint(equalTo: container.topAnchor, constant: -1),
-            ])
+        )
+        let isUsingMicrophone = audioActivitySnapshot.isInputActive(
+            processIdentifier: processIdentifier,
+            bundleIdentifier: bundleIdentifier
+        )
+        let isPlayingAudio = audioActivitySnapshot.isOutputActive(
+            processIdentifier: processIdentifier,
+            bundleIdentifier: bundleIdentifier
+        )
+        let isHidden = NSRunningApplication(
+            processIdentifier: processIdentifier
+        )?.isHidden == true
+        let windowState: String?
+        if window?.isFullscreen == true {
+            windowState = localized("FULLSCREEN", "全屏")
+        } else if window?.windowLayout == "floating" {
+            windowState = localized("FLOATING", "浮动")
+        } else {
+            windowState = nil
+        }
+        guard
+            badgeStatus != nil
+                || isUsingMicrophone
+                || isPlayingAudio
+                || isCurrent
+                || isHidden
+                || windowState != nil
+                || commandShortcutNumber != nil
+        else {
+            return nil
         }
 
-        return container
+        let stack = NSStackView()
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 6
+        stack.setContentHuggingPriority(.required, for: .horizontal)
+        stack.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        if isCurrent {
+            stack.addArrangedSubview(makeStatePill(
+                localized("CURRENT", "当前"),
+                toolTip: localized("Currently focused", "当前正在使用")
+            ))
+        }
+
+        if let windowState {
+            stack.addArrangedSubview(makeStatePill(windowState, toolTip: windowState))
+        }
+
+        if isHidden {
+            let hidden = localized("HIDDEN", "隐藏")
+            stack.addArrangedSubview(makeStatePill(
+                hidden,
+                toolTip: localized("Application is hidden", "App 当前已隐藏")
+            ))
+        }
+
+        if isUsingMicrophone {
+            stack.addArrangedSubview(makeStatusIcon(
+                systemSymbolName: "mic.fill",
+                description: localized("Using microphone", "正在使用麦克风"),
+                color: .systemOrange
+            ))
+        }
+
+        if isPlayingAudio {
+            stack.addArrangedSubview(makeStatusIcon(
+                systemSymbolName: "speaker.wave.2.fill",
+                description: localized("Playing audio", "正在播放声音"),
+                color: .secondaryLabelColor
+            ))
+        }
+
+        if let badgeStatus {
+            stack.addArrangedSubview(makeBadgeView(badgeStatus))
+        }
+
+        if let commandShortcutNumber {
+            stack.addArrangedSubview(makeShortcutKeycap(commandShortcutNumber))
+        }
+
+        return stack
+    }
+
+    private func makeStatusIcon(
+        systemSymbolName: String,
+        description: String,
+        color: NSColor
+    ) -> NSView {
+        let symbol = NSImage(
+            systemSymbolName: systemSymbolName,
+            accessibilityDescription: description
+        )?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        )
+        let icon = NSImageView(image: symbol ?? NSImage())
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.contentTintColor = color
+        icon.imageScaling = .scaleProportionallyDown
+        icon.toolTip = description
+        NSLayoutConstraint.activate([
+            icon.widthAnchor.constraint(equalToConstant: 16),
+            icon.heightAnchor.constraint(equalToConstant: 16),
+        ])
+        return icon
+    }
+
+    private func makeStatePill(_ text: String, toolTip: String) -> NSView {
+        let pill = NSView()
+        pill.translatesAutoresizingMaskIntoConstraints = false
+        pill.wantsLayer = true
+        pill.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.055).cgColor
+        pill.layer?.cornerRadius = 7.5
+        pill.toolTip = toolTip
+
+        let label = textLabel(
+            text,
+            size: 9,
+            weight: .semibold,
+            color: .tertiaryLabelColor
+        )
+        pill.addSubview(label)
+        NSLayoutConstraint.activate([
+            pill.heightAnchor.constraint(equalToConstant: 15),
+            label.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: 5),
+            label.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -5),
+            label.centerYAnchor.constraint(equalTo: pill.centerYAnchor, constant: -0.25),
+        ])
+        return pill
+    }
+
+    private func makeShortcutKeycap(_ number: Int) -> NSView {
+        let keycap = NSView()
+        keycap.translatesAutoresizingMaskIntoConstraints = false
+        keycap.wantsLayer = true
+        keycap.layer?.cornerRadius = 4
+        keycap.layer?.borderWidth = 0.5
+        keycap.layer?.borderColor = NSColor.secondaryLabelColor
+            .withAlphaComponent(0.38).cgColor
+        keycap.toolTip = localized(
+            "Press Command-\(number) to select",
+            "按 Command-\(number) 直接选择"
+        )
+
+        let label = textLabel(
+            "⌘\(number)",
+            size: 9,
+            weight: .medium,
+            color: .tertiaryLabelColor
+        )
+        label.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
+        keycap.addSubview(label)
+        NSLayoutConstraint.activate([
+            keycap.heightAnchor.constraint(equalToConstant: 17),
+            keycap.widthAnchor.constraint(greaterThanOrEqualToConstant: 24),
+            label.leadingAnchor.constraint(equalTo: keycap.leadingAnchor, constant: 4),
+            label.trailingAnchor.constraint(equalTo: keycap.trailingAnchor, constant: -4),
+            label.centerYAnchor.constraint(equalTo: keycap.centerYAnchor, constant: -0.25),
+        ])
+        return keycap
+    }
+
+    private func makeBadgeView(_ status: DockBadgeStatus) -> NSView {
+        guard let displayCount = status.displayCount else {
+            let dot = NSView()
+            dot.translatesAutoresizingMaskIntoConstraints = false
+            dot.wantsLayer = true
+            dot.layer?.backgroundColor = NSColor.systemRed.cgColor
+            dot.layer?.cornerRadius = 4
+            dot.toolTip = status.rawLabel
+            NSLayoutConstraint.activate([
+                dot.widthAnchor.constraint(equalToConstant: 8),
+                dot.heightAnchor.constraint(equalToConstant: 8),
+            ])
+            return dot
+        }
+
+        let badge = NSView()
+        badge.translatesAutoresizingMaskIntoConstraints = false
+        badge.wantsLayer = true
+        badge.layer?.backgroundColor = NSColor.systemRed.cgColor
+        badge.layer?.cornerRadius = 8.5
+        badge.toolTip = status.rawLabel
+
+        let countLabel = textLabel(
+            displayCount,
+            size: 10,
+            weight: .semibold,
+            color: .white
+        )
+        countLabel.alignment = .center
+        badge.addSubview(countLabel)
+        NSLayoutConstraint.activate([
+            badge.heightAnchor.constraint(equalToConstant: 17),
+            badge.widthAnchor.constraint(greaterThanOrEqualToConstant: 17),
+            countLabel.leadingAnchor.constraint(equalTo: badge.leadingAnchor, constant: 5),
+            countLabel.trailingAnchor.constraint(equalTo: badge.trailingAnchor, constant: -5),
+            countLabel.centerYAnchor.constraint(equalTo: badge.centerYAnchor, constant: -0.25),
+        ])
+        return badge
     }
 
     private func appIcon(for app: RunningApp) -> NSImage {
@@ -2382,45 +3583,45 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let promptSource = DispatchSource.makeSignalSource(signal: SIGURG, queue: .main)
         promptSource.setEventHandler { [weak self] in
-            self?.showWorkspacePrompt()
+            self?.showWindowControlPanel()
         }
         promptSource.resume()
-        workspacePromptSignalSource = promptSource
+        windowControlSignalSource = promptSource
     }
 
-    private func prepareWorkspacePrompt() {
-        let controller = WorkspacePromptController()
-        controller.onSubmit = { [weak self] workspace in
-            self?.moveFocusedApplication(to: workspace)
+    private func prepareWindowControlPanel() {
+        let controller = WindowControlPanelController()
+        controller.onCommand = { [weak self] request in
+            self?.performWindowControl(request)
         }
-        workspacePromptController = controller
+        windowControlPanelController = controller
     }
 
-    private func showWorkspacePrompt() {
+    private func showWindowControlPanel() {
         if panel?.isVisible == true {
             dismiss()
         }
         let screen = screenUnderPointer() ?? NSScreen.main ?? NSScreen.screens[0]
-        workspacePromptController?.update(
+        windowControlPanelController?.update(
             windows: allWindows,
             focusedWindowID: focusedWindowID
         )
-        workspacePromptController?.show(on: screen)
+        windowControlPanelController?.show(on: screen)
         loadWindows(presentErrors: false)
     }
 
-    private func updateWorkspacePromptIfVisible() {
-        guard workspacePromptController?.isVisible == true else { return }
-        workspacePromptController?.update(
+    private func updateWindowControlPanelIfVisible() {
+        guard windowControlPanelController?.isVisible == true else { return }
+        windowControlPanelController?.update(
             windows: allWindows,
             focusedWindowID: focusedWindowID
         )
     }
 
-    private func moveFocusedApplication(to workspace: String) {
-        DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+    private func performWindowControl(_ request: WindowControlRequest) {
+        windowControlQueue.async { [weak self] in
             do {
-                try AeroSpaceClient.moveFocusedApplication(to: workspace)
+                try AeroSpaceClient.perform(request)
                 DispatchQueue.main.async {
                     self?.loadWindows(presentErrors: false)
                 }

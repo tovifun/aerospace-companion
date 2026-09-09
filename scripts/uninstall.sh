@@ -78,6 +78,7 @@ rm -f \
     "$bin_dir/aerospace-move-focused-app-to-workspace" \
     "$bin_dir/aerospace-open-terminal-window" \
     "$bin_dir/aerospace-start-borders" \
+    "$bin_dir/aerospace-show-ambient" \
     "$bin_dir/aerospace-float-secondary-window" \
     "$bin_dir/aerospace-companion-update" \
     "$bin_dir/aerospace-companion-uninstall"

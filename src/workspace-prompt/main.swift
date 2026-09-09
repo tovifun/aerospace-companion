@@ -41,13 +41,13 @@ final class PromptController: NSObject, NSApplicationDelegate {
         title.alignment = .center
         stack.addArrangedSubview(title)
 
-        let hint = NSTextField(labelWithString: "Press 1-9 to move, Esc to cancel")
+        let hint = NSTextField(labelWithString: "Press 1-9 or 0 for workspace 10, Esc to cancel")
         hint.font = NSFont.systemFont(ofSize: 13, weight: .regular)
         hint.textColor = NSColor.white.withAlphaComponent(0.68)
         hint.alignment = .center
         stack.addArrangedSubview(hint)
 
-        let keys = NSTextField(labelWithString: "1  2  3  4  5  6  7  8  9")
+        let keys = NSTextField(labelWithString: "1  2  3  4  5  6  7  8  9  0")
         keys.font = NSFont.monospacedDigitSystemFont(ofSize: 28, weight: .medium)
         keys.textColor = .white
         keys.alignment = .center
@@ -68,8 +68,8 @@ final class PromptController: NSObject, NSApplicationDelegate {
             }
             if let chars = event.charactersIgnoringModifiers,
                let target = chars.first,
-               "123456789".contains(target) {
-                self?.submit(String(target))
+               "1234567890".contains(target) {
+                self?.submit(target == "0" ? "10" : String(target))
                 return nil
             }
             return event

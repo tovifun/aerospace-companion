@@ -39,6 +39,7 @@ xcrun swiftc \
     -framework ApplicationServices \
     -framework Cocoa \
     -framework Carbon \
+    -framework CoreAudio \
     -framework QuartzCore \
     "$root_dir/src/window-switcher/main.swift" \
     -o "$app/Contents/MacOS/aerospace-window-switcher"

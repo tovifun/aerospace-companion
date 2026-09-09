@@ -95,6 +95,8 @@ install -m 755 "$root_dir/scripts/aerospace-open-terminal-window" \
     "$bin_dir/aerospace-open-terminal-window"
 install -m 755 "$root_dir/scripts/aerospace-start-borders" \
     "$bin_dir/aerospace-start-borders"
+install -m 755 "$root_dir/scripts/aerospace-show-ambient" \
+    "$bin_dir/aerospace-show-ambient"
 install -m 755 "$root_dir/scripts/install-online.sh" \
     "$bin_dir/aerospace-companion-update"
 install -m 755 "$root_dir/scripts/uninstall.sh" \

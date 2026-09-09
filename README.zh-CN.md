@@ -2,7 +2,7 @@
 
 一套适合日常使用的
 [AeroSpace](https://github.com/nikitabobko/AeroSpace) 配置，附带类似 AltTab
-的窗口切换器，以及一键移动当前 App 全部窗口的工作流。
+的窗口切换器和紧凑的窗口控制台。
 
 [English](README.md)
 
@@ -15,11 +15,18 @@
 - 鼠标悬停只显示反馈，不改变键盘焦点；点击后切换窗口。
 - 按住 `Command` 浏览时，使用 `Command + W` 关闭选中窗口，或用
   `Command + Q` 退出选中窗口所属的 App。
+- `Command + Tab` 的前九项显示 `Command + 1-9` 键帽，可直接选中对应项，
+  松开 `Command` 后照常切换。
 - 显示正在运行但没有窗口的 App，并可重新打开。
+- Workspace 标题显示用途、所在显示器、当前可见状态和窗口数量。
+- 列表项标记当前、全屏、浮动和隐藏状态，并在右侧显示 Dock 未读数量、
+  麦克风占用和音频播放状态；无法取得具体数量时仍显示红点。
 - 局部半透明浮层，自动跟随 macOS 浅色或深色外观。
-- `Option + Shift + M`：将当前 App 的所有窗口移动到 workspace 1-9。
+- `Option + Shift + M`：打开窗口控制台，可移动 workspace、切换布局与显示器、
+  整理和缩放窗口。数字键移动当前窗口到 workspace 1-10，按住 `Shift` 则移动
+  当前 App 的全部窗口。
 - 自动将开发、浏览器、通讯、媒体和设计应用分配到对应 workspace。
-- 写作工具和系统工具自动悬浮。
+- 可选竖屏承载沟通、AI 和 Aerial 氛围空屏；快速笔记和临时工具仍自动悬浮。
 - 画中画和迷你播放器窗口悬浮在当前 workspace。
 - 支持持久 workspace、多显示器分配、焦点循环、独立缩放与窗口整理模式，
   切换显示器时鼠标按需跟随。
@@ -44,6 +51,18 @@ curl -fsSL https://raw.githubusercontent.com/tovifun/aerospace-companion/main/sc
 
 安装器会备份当前 AeroSpace 配置、安装仓库配置、在本机编译原生工具并
 重新加载 AeroSpace，同时支持 Apple Silicon 和 Intel Mac。
+
+窗口切换器与窗口控制台可在其他 Mac 上使用；仓库中的多屏配置是一个
+个人预设，按 `built-in`、`dell`、`Portrait` 匹配显示器，并不会自动识别
+其他机器的媒体屏、工作屏和竖屏。不同硬件需要修改配置里的
+`workspace-to-monitor-force-assignment`、显示器快捷键，以及
+`scripts/aerospace-show-ambient` 的返回显示器。默认终端 Ghostty 需要另行安装，
+或使用下面的选项指定已有终端。
+
+安装器不会安装 Aerial、修改 macOS 显示器排列或安装系统显示器名称覆盖。
+Workspace 10 只是显示当前壁纸。多屏用户还需按
+[AeroSpace 的排列要求](https://nikitabobko.github.io/AeroSpace/guide#proper-monitor-arrangement)
+给隐藏窗口留出底角空间。未读数量和音频状态取决于系统及应用提供的信息。
 
 也可以手动 clone：
 
@@ -114,18 +133,21 @@ defaults write io.github.tovifun.aerospace-companion.window-switcher \
 
 | Workspace | 分类 | 应用 |
 | --- | --- | --- |
-| `1` | 浏览和资料 | Chrome、Safari、Edge、Dia、Vivaldi、ChatGPT Atlas |
-| `2` | 开发主区 | Codex、Zed、Cursor、VS Code、Xcode、Ghostty、cmux、tty7、Otty、OpenCode |
-| `3` | 开发辅助 | Fork、DataGrip、Requestly |
-| `4` | 沟通 | 飞书、微信、企业微信、腾讯会议、Mail |
-| `5` | 音乐视频 | Music、网易云音乐、汽水音乐、Spotify、VLC、哔哩哔哩、抖音、TV |
-| `6` | 设计内容 | Figma、Eagle、RightFont、OBS、Screen Studio、Audacity |
-| `7-9` | 临时工作区 | 不自动分配应用 |
-| `10` | AI、研究 | ego lite、Claude、WorkBuddy AI、Grok Bot |
+| `1` | 媒体和会议 | Music、网易云音乐、汽水音乐、Spotify、VLC、哔哩哔哩、抖音、TV、腾讯会议 |
+| `2` | 浏览和资料 | Chrome、Safari、Edge、Dia、Vivaldi、ChatGPT Atlas、ego lite |
+| `3` | 临时预览 | 不自动分配应用 |
+| `4` | Codex 和编辑器 | Codex、Zed、Cursor、VS Code、Zcode、Xcode |
+| `5` | 终端和 Agent | Ghostty、cmux、tty7、Otty、OpenCode |
+| `6` | Git、数据库、API 和诊断 | Fork、DataGrip、Requestly、活动监视器、控制台 |
+| `7` | 设计和内容 | Figma、Eagle、RightFont、OBS、Screen Studio、Audacity、Writer、Typora、Clearly、Lettera、备忘录、文本编辑 |
+| `8` | 沟通和日常速览 | 飞书、微信、企业微信、Mail、Calendar、Reminders |
+| `9` | AI、研究 | Claude、WorkBuddy AI、Grok Bot |
+| `10` | 氛围空屏 | 不自动分配应用，专门留给 Aerial |
 
-Workspace 1-4 固定分配到扩展显示器，5-10 固定分配到主显示器。拔掉扩展
-显示器后，1-4 会临时汇总到主显示器；重新连接后会自动回到扩展显示器。
-写作和任务应用不绑定 workspace，默认悬浮在当前 workspace。
+Workspace 1-3 固定到内置媒体副屏，4-7 固定到 DELL 主工作屏。8-10 优先
+放在可选竖屏；竖屏断开时自动回退到 DELL，如果 DELL 也不存在才回退到
+内置屏。回退后的 workspace 仍相互独立，不会混入当前 workspace 的窗口布局。
+竖屏使用系统级名称 `Portrait`，同时保留空 EDID 名称作为兼容回退。
 
 ## 常用快捷键
 
@@ -133,7 +155,7 @@ Workspace 1-4 固定分配到扩展显示器，5-10 固定分配到主显示器�
 | --- | --- |
 | `Option + Tab` | 打开按 workspace 分组的窗口切换器 |
 | `Option + Shift + Tab` | 反向切换 |
-| `Option + Shift + M` | 移动当前 App 的全部窗口 |
+| `Option + Shift + M` | 打开窗口控制台 |
 | `Command + W` | 切换器打开时关闭选中的窗口 |
 | `Command + Q` | 切换器打开时退出选中窗口所属的 App |
 | `Option + H/J/K/L` | 向左/下/上/右聚焦窗口，到 workspace 边缘后循环 |
@@ -151,12 +173,20 @@ Workspace 1-4 固定分配到扩展显示器，5-10 固定分配到主显示器�
 | `Option + S` | 进入窗口整理模式 |
 | `Option + Control + H/J/K/L` | 聚焦其他显示器 |
 | `Option + Control + Shift + H/J/K/L` | 将窗口移动到其他显示器 |
+| `Option + Control + 1/2/3` | 直接聚焦内置屏／DELL／竖屏 |
+| `Option + Control + Shift + 1/2/3` | 将窗口移到内置屏／DELL／竖屏 |
+| `Option + Control + 0` | 让竖屏显示 Ambient 空 workspace，然后把焦点送回 DELL |
 
 整理模式中，使用 `H/J/K/L` 交换窗口，`Shift + H/J/K/L` 创建窗口分组，
 `R` 扁平化当前 workspace，`Esc` 退出。
 
 缩放模式中，使用 `H/J/K/L` 以 50 点调整宽度或高度，
 `Shift + H/J/K/L` 以 10 点微调，使用 `Enter` 或 `Esc` 退出。
+
+窗口控制台中，使用 `1-9/0` 移动当前窗口，使用 `Shift + 1-9/0` 移动当前
+App 的全部窗口；`F` 切换浮动/平铺，`M` 切换全屏，`T` 切换
+tiles/accordion，`O` 切换布局方向，`B` 均分，`R` 重置，方向键跨显示器移动，
+`A` 和 `Z` 分别进入带提示的排列与缩放模式。
 
 ## 卸载
 
