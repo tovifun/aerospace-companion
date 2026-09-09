@@ -28,11 +28,11 @@ macOS, with an AltTab-style window switcher and a compact window control panel.
   workspace 1-10; hold `Shift` to move every window of the current app.
 - Automatic app routing for development, browsers, communication, media, and
   design workspaces.
-- Optional portrait-display workspaces for communication, AI, and an empty
-  Aerial ambient view; quick-note and transient utility windows remain floating.
+- General-purpose workspaces without hardware-specific display assignments;
+  quick-note and transient utility windows remain floating.
 - Picture-in-Picture and mini-player windows stay floating on the current
   workspace.
-- Persistent workspaces, dual-monitor assignments, focus wrapping, dedicated
+- Persistent workspaces, directional display controls, focus wrapping, dedicated
   resize and arrange modes, and lazy mouse movement between displays.
 
 ## Requirements
@@ -65,11 +65,11 @@ cd aerospace-companion
 ./scripts/install.sh --with-config
 ```
 
-Ghostty is the default terminal for `Option + Enter`, and each press creates a
-new window. Choose another app at install time:
+The built-in macOS Terminal is the default for `Option + Enter`, and each press
+creates a new window. Choose another installed app at install time:
 
 ```bash
-AEROSPACE_TERMINAL_APP=Kitty ./scripts/install.sh --with-config
+AEROSPACE_TERMINAL_APP=Ghostty ./scripts/install.sh --with-config
 ```
 
 Without `--with-config`, the local installer updates only the companion tools.
@@ -130,15 +130,12 @@ Updates back up the current config before replacing it.
 
 ## Workspace Routing
 
-The switcher and Window Control work on other Macs, but the bundled display
-configuration is a personal preset matching `built-in`, `dell`, and `Portrait`.
-It does not automatically identify another machine's media, work, or portrait
-display. Adapt `workspace-to-monitor-force-assignment`, the display shortcuts,
-and the return display in `scripts/aerospace-show-ambient` to your hardware.
-Install Ghostty separately or select an existing terminal when installing.
+The default configuration uses tiles with automatic orientation and no forced
+display assignments. AeroSpace chooses a new workspace's initial orientation
+from the display's aspect ratio. App routing runs when windows are detected;
+existing windows can be moved manually. No additional terminal is required.
 
-The installer does not install Aerial, rearrange macOS displays, or install
-system display-name overrides. Workspace 10 simply reveals the current wallpaper.
+The installer does not rearrange macOS displays.
 Follow [AeroSpace's monitor arrangement guidance](https://nikitabobko.github.io/AeroSpace/guide#proper-monitor-arrangement)
 to leave room for hidden windows. Badge counts and audio status depend on the
 information available from the OS and applications.
@@ -149,19 +146,17 @@ information available from the OS and applications.
 | `2` | Browsers and reference | Chrome, Safari, Edge, Dia, Vivaldi, ChatGPT Atlas, ego lite |
 | `3` | Temporary and preview | No automatic routing |
 | `4` | Codex and editors | Codex, Zed, Cursor, VS Code, Zcode, Xcode |
-| `5` | Terminals and agents | Ghostty, cmux, tty7, Otty, OpenCode |
+| `5` | Terminals and agents | Terminal, iTerm2, Ghostty, cmux, tty7, Otty, OpenCode |
 | `6` | Git, databases, API, and diagnostics | Fork, DataGrip, Requestly, Activity Monitor, Console |
 | `7` | Design and content | Figma, Eagle, RightFont, OBS, Screen Studio, Audacity, Writer, Typora, Clearly, Lettera, Notes, TextEdit |
 | `8` | Communication and daily glance | Feishu, WeChat, WeCom, Mail, Calendar, Reminders |
 | `9` | AI and research | Claude, WorkBuddy AI, Grok Bot |
-| `10` | Ambient | No automatic routing; kept empty for Aerial |
+| `10` | Extra workspace | No automatic routing; available for manual organization |
 
-Workspaces 1-3 stay on the built-in media display and 4-7 on the DELL work
-display. Workspaces 8-10 prefer the optional portrait display; when it is
-disconnected, they fall back to the DELL, and then to the built-in display if
-the DELL is also unavailable. The fallback workspaces remain separate rather
-than joining the visible workspace's layout. The portrait display uses the
-system-level name `Portrait`, with its empty EDID name retained as a fallback.
+Workspaces use AeroSpace's default display placement. Use workspaces 1-10 on
+a single display, or press `Option + Control + Tab` to move the current workspace
+to the next display. Window Control also supports moving individual windows
+between displays.
 
 ## Key Bindings
 
@@ -187,9 +182,7 @@ system-level name `Portrait`, with its empty EDID name retained as a fallback.
 | `Option + S` | Enter arrange mode |
 | `Option + Control + H/J/K/L` | Focus another monitor |
 | `Option + Control + Shift + H/J/K/L` | Move the window to another monitor |
-| `Option + Control + 1/2/3` | Focus the built-in/DELL/portrait display directly |
-| `Option + Control + Shift + 1/2/3` | Move the window to the built-in/DELL/portrait display |
-| `Option + Control + 0` | Show Ambient on the portrait display, then return focus to DELL |
+| `Option + Control + Tab` | Move the current workspace to the next display |
 
 In arrange mode, use `H/J/K/L` to swap windows,
 `Shift + H/J/K/L` to group windows, `R` to flatten the workspace, and `Esc` to

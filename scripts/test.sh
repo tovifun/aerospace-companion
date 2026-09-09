@@ -9,7 +9,6 @@ sh -n "$root_dir/scripts/build.sh"
 sh -n "$root_dir/scripts/install.sh"
 sh -n "$root_dir/scripts/install-online.sh"
 sh -n "$root_dir/scripts/uninstall.sh"
-sh -n "$root_dir/scripts/aerospace-show-ambient"
 sh -n "$root_dir/scripts/aerospace-window-switcher-trigger"
 sh -n "$root_dir/scripts/aerospace-open-terminal-window"
 sh -n "$root_dir/scripts/aerospace-start-borders"
@@ -126,7 +125,7 @@ grep -q 'case "4": role = localized("CODE & EDITORS", "Codex 与编辑器")' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'case "8": role = localized("COMMUNICATION", "沟通")' \
     "$root_dir/src/window-switcher/main.swift"
-grep -q 'case "10": role = localized("AMBIENT", "氛围空屏")' \
+grep -q 'case "10": role = localized("EXTRA WORKSPACE", "备用空间")' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'parts.append(localized("CURRENT", "当前"))' \
     "$root_dir/src/window-switcher/main.swift"
@@ -187,20 +186,6 @@ grep -q 'target == "0" ? "10"' "$root_dir/src/workspace-prompt/main.swift"
 grep -q '/bin/kill -URG "$pid"' \
     "$root_dir/scripts/aerospace-move-focused-app-to-workspace"
 grep -q 'pgrep -f "$legacy_binary"' "$root_dir/scripts/install.sh"
-grep -q '^\[workspace-to-monitor-force-assignment\]' \
-    "$root_dir/config/aerospace.toml"
-grep -q "1 = 'built-in'" \
-    "$root_dir/config/aerospace.toml"
-grep -q "4 = 'dell'" \
-    "$root_dir/config/aerospace.toml"
-grep -q "7 = 'dell'" \
-    "$root_dir/config/aerospace.toml"
-grep -Fq "10 = ['^Portrait$', '^$', 'dell', 'built-in']" \
-    "$root_dir/config/aerospace.toml"
-grep -Fq "layout --workspace 4 --root h_tiles" \
-    "$root_dir/config/aerospace.toml"
-grep -Fq "layout --workspace 10 --root v_accordion" \
-    "$root_dir/config/aerospace.toml"
 grep -Fq "com.google.Chrome', run = 'move-node-to-workspace 2'" \
     "$root_dir/config/aerospace.toml"
 grep -Fq "com.citrolabs.ego.lite', run = 'move-node-to-workspace 2'" \
@@ -225,12 +210,6 @@ grep -Fq "com.apple.ActivityMonitor', run = 'move-node-to-workspace 6'" \
     "$root_dir/config/aerospace.toml"
 grep -Fq "com.apple.iCal', run = 'move-node-to-workspace 8'" \
     "$root_dir/config/aerospace.toml"
-grep -q "alt-ctrl-2 = 'focus-monitor dell'" \
-    "$root_dir/config/aerospace.toml"
-grep -q "alt-ctrl-1 = 'focus-monitor built-in'" \
-    "$root_dir/config/aerospace.toml"
-grep -q "alt-ctrl-3 = 'focus-monitor 3'" \
-    "$root_dir/config/aerospace.toml"
 grep -q "on-focused-monitor-changed = \['move-mouse monitor-lazy-center'\]" \
     "$root_dir/config/aerospace.toml"
 grep -q "alt-backtick = 'focus-back-and-forth || workspace-back-and-forth'" \
@@ -241,10 +220,6 @@ grep -q '^\[mode.resize.binding\]' \
     "$root_dir/config/aerospace.toml"
 grep -q "alt-0 = 'workspace 10'" \
     "$root_dir/config/aerospace.toml"
-grep -q "alt-ctrl-0 = 'exec-and-forget __HOME__/.local/bin/aerospace-show-ambient'" \
-    "$root_dir/config/aerospace.toml"
-grep -q 'install -m 755 "$root_dir/scripts/aerospace-show-ambient"' \
-    "$root_dir/scripts/install.sh"
 grep -q "alt-shift-0 = 'move-node-to-workspace --focus-follows-window 10'" \
     "$root_dir/config/aerospace.toml"
 grep -Fq 'list-workspaces --monitor focused --empty no | workspace --wrap-around --stdin next' \
@@ -263,9 +238,9 @@ grep -q 'width=3.0' \
     "$root_dir/scripts/aerospace-start-borders"
 grep -q 'active_color=0x4d000000' \
     "$root_dir/scripts/aerospace-start-borders"
-if grep -q 'move-workspace-to-monitor' \
+if grep -Eq '^\[workspace-to-monitor-force-assignment\]|dell|Portrait|built-in|aerospace-show-ambient' \
     "$root_dir/config/aerospace.toml"; then
-    printf 'Force-assigned workspaces cannot be moved between monitors.\n' >&2
+    printf 'Default config must not depend on a personal display arrangement.\n' >&2
     exit 1
 fi
 if grep -q 'com\.electron\.lark\.helper\|window-title} = 图片和视频' \
@@ -310,13 +285,14 @@ test -x "$test_home/.local/bin/aerospace-window-switcher-trigger"
 test -x "$test_home/.local/bin/aerospace-move-focused-app-to-workspace"
 test -x "$test_home/.local/bin/aerospace-open-terminal-window"
 test -x "$test_home/.local/bin/aerospace-start-borders"
-test -x "$test_home/.local/bin/aerospace-show-ambient"
+test ! -e "$test_home/.local/bin/aerospace-show-ambient"
 test ! -e "$test_home/.local/bin/aerospace-float-secondary-window"
 test -x "$test_home/.local/bin/aerospace-companion-update"
 test -x "$test_home/.local/bin/aerospace-workspace-prompt"
 test -d "$test_home/.local/share/aerospace-companion/AeroSpaceWindowSwitcher.app"
 test ! -e "$test_home/.local/share/aerospace-window-switcher"
 grep -q '^# AeroSpace Companion configuration' "$test_home/.aerospace.toml"
+grep -Fq 'aerospace-open-terminal-window "Terminal"' "$test_home/.aerospace.toml"
 if grep -q '__HOME__\\|__TERMINAL_APP__' "$test_home/.aerospace.toml"; then
     printf 'Config placeholders were not rendered.\n' >&2
     exit 1

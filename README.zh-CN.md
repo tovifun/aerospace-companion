@@ -26,7 +26,7 @@
   整理和缩放窗口。数字键移动当前窗口到 workspace 1-10，按住 `Shift` 则移动
   当前 App 的全部窗口。
 - 自动将开发、浏览器、通讯、媒体和设计应用分配到对应 workspace。
-- 可选竖屏承载沟通、AI 和 Aerial 氛围空屏；快速笔记和临时工具仍自动悬浮。
+- 通用 workspace 分类，不依赖特定显示器；快速笔记和临时工具自动悬浮。
 - 画中画和迷你播放器窗口悬浮在当前 workspace。
 - 支持持久 workspace、多显示器分配、焦点循环、独立缩放与窗口整理模式，
   切换显示器时鼠标按需跟随。
@@ -52,15 +52,11 @@ curl -fsSL https://raw.githubusercontent.com/tovifun/aerospace-companion/main/sc
 安装器会备份当前 AeroSpace 配置、安装仓库配置、在本机编译原生工具并
 重新加载 AeroSpace，同时支持 Apple Silicon 和 Intel Mac。
 
-窗口切换器与窗口控制台可在其他 Mac 上使用；仓库中的多屏配置是一个
-个人预设，按 `built-in`、`dell`、`Portrait` 匹配显示器，并不会自动识别
-其他机器的媒体屏、工作屏和竖屏。不同硬件需要修改配置里的
-`workspace-to-monitor-force-assignment`、显示器快捷键，以及
-`scripts/aerospace-show-ambient` 的返回显示器。默认终端 Ghostty 需要另行安装，
-或使用下面的选项指定已有终端。
+默认配置不绑定任何显示器，使用平铺布局和自动方向；新 workspace 的初始
+方向由 AeroSpace 按屏幕宽高决定。`Option + Enter` 使用 macOS 自带 Terminal，
+无需额外安装终端。应用自动分配在窗口被检测到时执行，已有窗口可手动移动。
 
-安装器不会安装 Aerial、修改 macOS 显示器排列或安装系统显示器名称覆盖。
-Workspace 10 只是显示当前壁纸。多屏用户还需按
+安装器不会修改 macOS 显示器排列。多屏用户仍需按
 [AeroSpace 的排列要求](https://nikitabobko.github.io/AeroSpace/guide#proper-monitor-arrangement)
 给隐藏窗口留出底角空间。未读数量和音频状态取决于系统及应用提供的信息。
 
@@ -72,10 +68,10 @@ cd aerospace-companion
 ./scripts/install.sh --with-config
 ```
 
-`Option + Enter` 默认打开一个新的 Ghostty 窗口。可以在安装时改成其他终端：
+`Option + Enter` 默认打开一个新的 Terminal 窗口。可指定已安装的其他终端：
 
 ```bash
-AEROSPACE_TERMINAL_APP=Kitty ./scripts/install.sh --with-config
+AEROSPACE_TERMINAL_APP=Ghostty ./scripts/install.sh --with-config
 ```
 
 不传 `--with-config` 时，本地安装器只更新辅助工具，不替换配置。
@@ -137,17 +133,16 @@ defaults write io.github.tovifun.aerospace-companion.window-switcher \
 | `2` | 浏览和资料 | Chrome、Safari、Edge、Dia、Vivaldi、ChatGPT Atlas、ego lite |
 | `3` | 临时预览 | 不自动分配应用 |
 | `4` | Codex 和编辑器 | Codex、Zed、Cursor、VS Code、Zcode、Xcode |
-| `5` | 终端和 Agent | Ghostty、cmux、tty7、Otty、OpenCode |
+| `5` | 终端和 Agent | Terminal、iTerm2、Ghostty、cmux、tty7、Otty、OpenCode |
 | `6` | Git、数据库、API 和诊断 | Fork、DataGrip、Requestly、活动监视器、控制台 |
 | `7` | 设计和内容 | Figma、Eagle、RightFont、OBS、Screen Studio、Audacity、Writer、Typora、Clearly、Lettera、备忘录、文本编辑 |
 | `8` | 沟通和日常速览 | 飞书、微信、企业微信、Mail、Calendar、Reminders |
 | `9` | AI、研究 | Claude、WorkBuddy AI、Grok Bot |
-| `10` | 氛围空屏 | 不自动分配应用，专门留给 Aerial |
+| `10` | 备用空间 | 不自动分配应用，按需使用 |
 
-Workspace 1-3 固定到内置媒体副屏，4-7 固定到 DELL 主工作屏。8-10 优先
-放在可选竖屏；竖屏断开时自动回退到 DELL，如果 DELL 也不存在才回退到
-内置屏。回退后的 workspace 仍相互独立，不会混入当前 workspace 的窗口布局。
-竖屏使用系统级名称 `Portrait`，同时保留空 EDID 名称作为兼容回退。
+Workspace 使用 AeroSpace 默认的显示器分配，不做强制绑定。单屏用户直接使用
+1–10；多屏用户可用 `Option + Control + Tab` 将当前 workspace 移到下一块
+显示器，也可以通过窗口控制台逐个移动窗口。
 
 ## 常用快捷键
 
@@ -173,9 +168,7 @@ Workspace 1-3 固定到内置媒体副屏，4-7 固定到 DELL 主工作屏。8-
 | `Option + S` | 进入窗口整理模式 |
 | `Option + Control + H/J/K/L` | 聚焦其他显示器 |
 | `Option + Control + Shift + H/J/K/L` | 将窗口移动到其他显示器 |
-| `Option + Control + 1/2/3` | 直接聚焦内置屏／DELL／竖屏 |
-| `Option + Control + Shift + 1/2/3` | 将窗口移到内置屏／DELL／竖屏 |
-| `Option + Control + 0` | 让竖屏显示 Ambient 空 workspace，然后把焦点送回 DELL |
+| `Option + Control + Tab` | 将当前 workspace 移到下一块显示器 |
 
 整理模式中，使用 `H/J/K/L` 交换窗口，`Shift + H/J/K/L` 创建窗口分组，
 `R` 扁平化当前 workspace，`Esc` 退出。

@@ -2,7 +2,7 @@
 
 set -eu
 
-terminal_app=${1:-Ghostty}
+terminal_app=${1:-Terminal}
 
 case "$terminal_app" in
     Ghostty|Ghostty.app)

@@ -95,8 +95,6 @@ install -m 755 "$root_dir/scripts/aerospace-open-terminal-window" \
     "$bin_dir/aerospace-open-terminal-window"
 install -m 755 "$root_dir/scripts/aerospace-start-borders" \
     "$bin_dir/aerospace-start-borders"
-install -m 755 "$root_dir/scripts/aerospace-show-ambient" \
-    "$bin_dir/aerospace-show-ambient"
 install -m 755 "$root_dir/scripts/install-online.sh" \
     "$bin_dir/aerospace-companion-update"
 install -m 755 "$root_dir/scripts/uninstall.sh" \
@@ -125,7 +123,7 @@ if [ "$with_config" -eq 1 ]; then
         cp -p "$config_path" "$config_backup"
     fi
 
-    terminal_app=${AEROSPACE_TERMINAL_APP:-Ghostty}
+    terminal_app=${AEROSPACE_TERMINAL_APP:-Terminal}
     escaped_home=$(printf '%s' "$HOME" | sed 's/[&|\\]/\\&/g')
     escaped_terminal=$(printf '%s' "$terminal_app" | sed 's/[&|\\]/\\&/g')
     rendered_config=$(mktemp "${TMPDIR:-/tmp}/aerospace-companion-config.XXXXXX")

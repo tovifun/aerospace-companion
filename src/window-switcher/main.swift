@@ -1294,7 +1294,7 @@ private final class WindowControlPanelController {
         case "7": return localized("Content", "设计内容")
         case "8": return localized("Comms", "沟通")
         case "9": return localized("AI", "AI 研究")
-        case "10": return localized("Ambient", "氛围空屏")
+        case "10": return localized("Extra", "备用空间")
         default: return workspace
         }
     }
@@ -2584,7 +2584,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         case "7": role = localized("DESIGN & CONTENT", "设计与内容")
         case "8": role = localized("COMMUNICATION", "沟通")
         case "9": role = localized("AI & RESEARCH", "AI 研究")
-        case "10": role = localized("AMBIENT", "氛围空屏")
+        case "10": role = localized("EXTRA WORKSPACE", "备用空间")
         default: role = nil
         }
         return role.map { "\(workspace) · \($0)" }
