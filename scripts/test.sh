@@ -23,9 +23,9 @@ grep -q 'switchingTo: focusedWorkspace == window.workspace' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'let hasCachedItems = !orderedItems.isEmpty' \
     "$root_dir/src/window-switcher/main.swift"
-grep -q 'self.warmIconCache()' \
+grep -q 'warmIconCache()' \
     "$root_dir/src/window-switcher/main.swift"
-grep -q 'let dockBadgeSnapshot = DockBadgeClient.currentSnapshot()' \
+grep -q 'DockBadgeClient.currentSnapshot()' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'attribute("AXStatusLabel", from: element)' \
     "$root_dir/src/window-switcher/main.swift"
@@ -35,7 +35,7 @@ grep -q 'badge.layer?.backgroundColor = NSColor.systemRed.cgColor' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'rawLabel.compactMap(\\.wholeNumberValue)' \
     "$root_dir/src/window-switcher/main.swift"
-grep -q 'let audioActivitySnapshot = AudioActivityClient.currentSnapshot()' \
+grep -q 'AudioActivityClient.currentSnapshot()' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'kAudioHardwarePropertyProcessObjectList' \
     "$root_dir/src/window-switcher/main.swift"
@@ -49,17 +49,17 @@ grep -q 'systemSymbolName: "speaker.wave.2.fill"' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q -- '-framework CoreAudio' \
     "$root_dir/scripts/build.sh"
-grep -q 'return excludingStaleUntitledWindows(windows)' \
+grep -q 'return excludingStaleUntitledWindows(windows,' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'CGWindowListCopyWindowInfo' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'liveWindowOwners\[window.windowID\] == window.appPID' \
     "$root_dir/src/window-switcher/main.swift"
-grep -q 'if isRefreshing || orderedItems.isEmpty' \
+grep -q 'else if orderedItems.isEmpty' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'globalMouseMonitor = NSEvent.addGlobalMonitorForEvents' \
     "$root_dir/src/window-switcher/main.swift"
-grep -q '!panel.frame.contains(NSEvent.mouseLocation)' \
+grep -q '!panel.frame.contains(mouseLocation)' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'maximumPanelHeight: CGFloat = 960' \
     "$root_dir/src/window-switcher/main.swift"
@@ -79,19 +79,19 @@ grep -q 'globalMagnifyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mag
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'scrollSwitcher(byMagnification: event.magnification)' \
     "$root_dir/src/window-switcher/main.swift"
-grep -q 'currentOrigin.y - magnification \* 800' \
+grep -q 'SwitcherScroll.apply(deltaY: magnification \* 800' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'panel.frame.contains(mouseLocation)' \
     "$root_dir/src/window-switcher/main.swift"
-grep -q 'scrollView.scrollWheel(with: event)' \
+grep -q 'self.scrollSwitcher(with: event, in: scrollView)' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'CGEventType.scrollWheel.rawValue' \
     "$root_dir/src/window-switcher/main.swift"
-grep -q 'scrollEventCopy.flags.subtracting(.maskCommand)' \
+grep -q 'precise: event.hasPreciseScrollingDeltas' \
     "$root_dir/src/window-switcher/main.swift"
-grep -q 'let scrollEvent = NSEvent(cgEvent: scrollEventCopy)' \
+grep -q 'let scrollEvent = NSEvent(cgEvent: event)' \
     "$root_dir/src/window-switcher/main.swift"
-grep -q 'scrollView.scrollWheel(with: scrollEvent)' \
+grep -q 'scrollSwitcher(with: scrollEvent, in: scrollView)' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'CGEvent.tapCreate' \
     "$root_dir/src/window-switcher/main.swift"
@@ -121,14 +121,28 @@ grep -q 'case workspaceIsVisible = "workspace-is-visible"' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'case monitorName = "monitor-name"' \
     "$root_dir/src/window-switcher/main.swift"
-grep -q 'case "4": role = localized("CODE & EDITORS", "Codex 与编辑器")' \
+grep -q 'dictionary(forKey: "workspaceLabels")' \
     "$root_dir/src/window-switcher/main.swift"
-grep -q 'case "8": role = localized("COMMUNICATION", "沟通")' \
+if grep -q 'case "4":.*localized' "$root_dir/src/window-switcher/main.swift"; then
+    printf 'Workspace labels must not impose developer roles by default.\n' >&2
+    exit 1
+fi
+grep -q 'case workspaceLayout = "workspace-root-container-layout"' \
     "$root_dir/src/window-switcher/main.swift"
-grep -q 'case "10": role = localized("EXTRA WORKSPACE", "备用空间")' \
+grep -q 'layout: firstWindow.workspaceLayout' \
     "$root_dir/src/window-switcher/main.swift"
-grep -q 'parts.append(localized("CURRENT", "当前"))' \
+grep -q 'titleIcons: makeWorkspaceTitleIcons(group)' \
     "$root_dir/src/window-switcher/main.swift"
+grep -q 'titleIcons.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor' \
+    "$root_dir/src/window-switcher/main.swift"
+# Layout sizes and preference persistence are exercised by the settings checks below.
+if grep -q 'includesEmptyWorkspaces\|let includeEmpty = modifier' "$root_dir/src/window-switcher/main.swift"; then
+    printf 'Alt-Tab and Command-Tab must share the same workspace list.\n' >&2
+    exit 1
+fi
+grep -Fq 'status.addArrangedSubview(makeShortcutKeycap(shortcutNumber))' "$root_dir/src/window-switcher/main.swift"
+grep -q 'case workspace(WorkspaceGroup)' "$root_dir/src/window-switcher/main.swift"
+grep -q 'AeroSpaceClient.activateWorkspace(group.workspace)' "$root_dir/src/window-switcher/main.swift"
 grep -q 'window?.windowLayout == "floating"' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'NSRunningApplication(processIdentifier: processIdentifier)?.isHidden' \
@@ -160,7 +174,7 @@ grep -q 'static let hoveredItemActionPriorityKey = "hoveredItemActionPriority"' 
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'row.onHoverChanged = ' \
     "$root_dir/src/window-switcher/main.swift"
-grep -q 'let target = commandActionTarget' \
+grep -q 'private var commandActionTarget' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'DispatchSource.makeSignalSource(signal: SIGURG, queue: .main)' \
     "$root_dir/src/window-switcher/main.swift"
@@ -172,7 +186,7 @@ grep -q 'for rowRange in \[1\.\.\.5, 6\.\.\.10\]' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q 'case moveApplicationToWorkspace(String)' \
     "$root_dir/src/window-switcher/main.swift"
-grep -q 'self.updateWindowControlPanelIfVisible()' \
+grep -q 'updateWindowControlPanelIfVisible()' \
     "$root_dir/src/window-switcher/main.swift"
 grep -q '"1–0 当前窗口   ⇧1–0 当前 App 全部窗口' \
     "$root_dir/src/window-switcher/main.swift"
@@ -187,29 +201,37 @@ grep -q '/bin/kill -URG "$pid"' \
     "$root_dir/scripts/aerospace-move-focused-app-to-workspace"
 grep -q 'pgrep -f "$legacy_binary"' "$root_dir/scripts/install.sh"
 grep -Fq "com.google.Chrome', run = 'move-node-to-workspace 2'" \
-    "$root_dir/config/aerospace.toml"
+    "$root_dir/config/examples/developer-routing.toml"
 grep -Fq "com.citrolabs.ego.lite', run = 'move-node-to-workspace 2'" \
-    "$root_dir/config/aerospace.toml"
-grep -Fq "com.github.tty7', run = 'move-node-to-workspace 5'" \
-    "$root_dir/config/aerospace.toml"
-grep -Fq "io.appmakes.otty', run = 'move-node-to-workspace 5'" \
-    "$root_dir/config/aerospace.toml"
-grep -Fq "com.DanPristupov.Fork', run = 'move-node-to-workspace 6'" \
-    "$root_dir/config/aerospace.toml"
-grep -Fq "com.electron.lark', run = 'move-node-to-workspace 8'" \
-    "$root_dir/config/aerospace.toml"
+    "$root_dir/config/examples/developer-routing.toml"
+grep -Fq "com.github.tty7', run = 'move-node-to-workspace 4'" \
+    "$root_dir/config/examples/developer-routing.toml"
+grep -Fq "io.appmakes.otty', run = 'move-node-to-workspace 4'" \
+    "$root_dir/config/examples/developer-routing.toml"
+grep -Fq "com.DanPristupov.Fork', run = 'move-node-to-workspace 5'" \
+    "$root_dir/config/examples/developer-routing.toml"
+grep -Fq "com.electron.lark', run = 'move-node-to-workspace 6'" \
+    "$root_dir/config/examples/developer-routing.toml"
 grep -Fq "com.spotify.client', run = 'move-node-to-workspace 1'" \
-    "$root_dir/config/aerospace.toml"
+    "$root_dir/config/examples/developer-routing.toml"
 grep -Fq "com.figma.Desktop', run = 'move-node-to-workspace 7'" \
-    "$root_dir/config/aerospace.toml"
-grep -Fq "com.anysphere.sand', run = 'move-node-to-workspace 9'" \
-    "$root_dir/config/aerospace.toml"
+    "$root_dir/config/examples/developer-routing.toml"
+grep -Fq "com.anysphere.sand', run = 'move-node-to-workspace 8'" \
+    "$root_dir/config/examples/developer-routing.toml"
 grep -Fq "abnerworks.Typora', run = 'move-node-to-workspace 7'" \
-    "$root_dir/config/aerospace.toml"
-grep -Fq "com.apple.ActivityMonitor', run = 'move-node-to-workspace 6'" \
-    "$root_dir/config/aerospace.toml"
-grep -Fq "com.apple.iCal', run = 'move-node-to-workspace 8'" \
-    "$root_dir/config/aerospace.toml"
+    "$root_dir/config/examples/developer-routing.toml"
+grep -Fq "com.apple.ActivityMonitor', run = 'move-node-to-workspace 5'" \
+    "$root_dir/config/examples/developer-routing.toml"
+grep -Fq "com.apple.iCal', run = 'move-node-to-workspace 6'" \
+    "$root_dir/config/examples/developer-routing.toml"
+guard_line=$(grep -n "if = 'test %{window-layout} = floating'" \
+    "$root_dir/config/examples/developer-routing.toml" | head -n1 | cut -d: -f1)
+first_route_line=$(grep -n "run = 'move-node-to-workspace" \
+    "$root_dir/config/examples/developer-routing.toml" | head -n1 | cut -d: -f1)
+if [ -z "$guard_line" ] || [ -z "$first_route_line" ] || [ "$guard_line" -ge "$first_route_line" ]; then
+    printf 'Routing example must guard floating windows before app routing.\n' >&2
+    exit 1
+fi
 grep -q "on-focused-monitor-changed = \['move-mouse monitor-lazy-center'\]" \
     "$root_dir/config/aerospace.toml"
 grep -q "alt-backtick = 'focus-back-and-forth || workspace-back-and-forth'" \
@@ -249,6 +271,11 @@ if grep -q 'com\.electron\.lark\.helper\|window-title} = 图片和视频' \
     exit 1
 fi
 
+if grep -q "run = 'move-node-to-workspace" "$root_dir/config/aerospace.toml"; then
+    printf 'Default config must not route apps to opinionated workspaces.\n' >&2
+    exit 1
+fi
+
 personal_matches=$(
     grep -R "/Users/tovizhong\\|com\\.tovizhong" \
         "$root_dir/src" "$root_dir/config" "$root_dir/resources" 2>/dev/null || true
@@ -271,6 +298,48 @@ codesign --verify --strict "$root_dir/build/aerospace-workspace-prompt"
 test_root=$(mktemp -d "${TMPDIR:-/tmp}/aerospace-companion-test.XXXXXX")
 trap 'rm -rf "$test_root"' EXIT
 test_home="$test_root/home"
+xcrun swiftc \
+    "$root_dir/src/window-switcher/Localization.swift" \
+    "$root_dir/src/window-switcher/WindowSearch.swift" \
+    "$root_dir/src/window-switcher/WindowSearchController.swift" \
+    "$root_dir/tests/window-search/main.swift" \
+    -o "$test_root/window-search-tests"
+"$test_root/window-search-tests"
+xcrun swiftc \
+    "$root_dir/src/window-switcher/WorkspaceHeaderMetadata.swift" \
+    "$root_dir/src/window-switcher/WorkspaceCatalog.swift" \
+    "$root_dir/src/window-switcher/WindowDisplayTitle.swift" \
+    "$root_dir/src/window-switcher/SwitcherScroll.swift" \
+    "$root_dir/tests/workspace-metadata/main.swift" \
+    -o "$test_root/workspace-metadata-tests"
+"$test_root/workspace-metadata-tests"
+xcrun swiftc \
+    "$root_dir/src/window-switcher/Localization.swift" \
+    "$root_dir/src/window-switcher/SwitcherPreferences.swift" \
+    "$root_dir/src/window-switcher/SettingsWindowController.swift" \
+    "$root_dir/tests/settings/main.swift" \
+    -o "$test_root/settings-tests"
+"$test_root/settings-tests"
+cat "$root_dir/src/window-switcher/main.swift" \
+    "$root_dir/tests/switcher-actions/main.swift" > "$test_root/main.swift"
+xcrun swiftc -D SWITCHER_ACTION_TESTING \
+    -framework Cocoa -framework ApplicationServices -framework Carbon \
+    -framework CoreAudio -framework QuartzCore \
+    "$test_root/main.swift" \
+    "$root_dir/src/window-switcher/Localization.swift" \
+    "$root_dir/src/window-switcher/SwitcherPreferences.swift" \
+    "$root_dir/src/window-switcher/SettingsWindowController.swift" \
+    "$root_dir/src/window-switcher/WorkspaceHeaderMetadata.swift" \
+    "$root_dir/src/window-switcher/WorkspaceCatalog.swift" \
+    "$root_dir/src/window-switcher/WindowDisplayTitle.swift" \
+    "$root_dir/src/window-switcher/SwitcherScroll.swift" \
+    "$root_dir/src/window-switcher/SwitcherActions.swift" \
+    "$root_dir/src/window-switcher/SwitcherReopenTracker.swift" \
+    "$root_dir/src/window-switcher/SwitcherActionFeedback.swift" \
+    "$root_dir/src/window-switcher/WindowSearch.swift" \
+    "$root_dir/src/window-switcher/WindowSearchController.swift" \
+    -o "$test_root/switcher-action-tests"
+"$test_root/switcher-action-tests"
 mkdir -p "$test_home"
 printf '# original config\n' > "$test_home/.aerospace.toml"
 mkdir -p \
@@ -341,6 +410,27 @@ AEROSPACE_COMPANION_SKIP_RELOAD=1 \
 
 test -x "$online_home/.local/bin/aerospace-companion-update"
 grep -q '^# AeroSpace Companion configuration' "$online_home/.aerospace.toml"
+
+# A normal online update must preserve personal changes byte-for-byte.
+printf '# personal routing and monitor rules\n' >> "$online_home/.aerospace.toml"
+cp "$online_home/.aerospace.toml" "$test_root/personal-config"
+HOME="$online_home" \
+AEROSPACE_COMPANION_ARCHIVE_URL="file://$archive_path" \
+AEROSPACE_COMPANION_SKIP_LAUNCH=1 \
+AEROSPACE_COMPANION_SKIP_RELOAD=1 \
+"$root_dir/scripts/install-online.sh"
+cmp "$test_root/personal-config" "$online_home/.aerospace.toml"
+
+# Replacing the config remains available only when explicitly requested.
+HOME="$online_home" \
+AEROSPACE_COMPANION_ARCHIVE_URL="file://$archive_path" \
+AEROSPACE_COMPANION_SKIP_LAUNCH=1 \
+AEROSPACE_COMPANION_SKIP_RELOAD=1 \
+"$root_dir/scripts/install-online.sh" --with-config
+if grep -q '^# personal routing' "$online_home/.aerospace.toml"; then
+    printf 'Explicit config replacement did not apply.\n' >&2
+    exit 1
+fi
 
 HOME="$online_home" \
 AEROSPACE_COMPANION_SKIP_RELOAD=1 \

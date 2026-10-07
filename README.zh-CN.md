@@ -9,27 +9,67 @@
 ## 功能
 
 - `Option + Tab`：按 AeroSpace workspace 分组浏览所有窗口。
+- Option-Tab 与 Command-Tab 使用相同列表及顺序；空工作区显示为紧凑的单行入口，
+  选中后松开对应修饰键或鼠标点击即可进入，不启动 App。
 - `Option + Shift + Tab`：反向浏览。
+- `Option + P`：搜索所有工作区的窗口。可按应用名、窗口标题、工作区编号／标签、
+  显示器名过滤，多个关键词用空格分隔；支持中文。上下键选择、回车切换、Esc 取消，
+  松开 Option 后搜索框继续打开。也可从菜单栏选择「搜索窗口…」。
 - AeroSpace 运行时以相同的窗口切换器接管 `Command + Tab`，不再显示 macOS
   App 切换器（首次使用需要授予辅助功能和输入监控权限）。
 - 鼠标悬停只显示反馈，不改变键盘焦点；点击后切换窗口。
 - 按住 `Command` 浏览时，使用 `Command + W` 关闭选中窗口，或用
   `Command + Q` 退出选中窗口所属的 App。
+  操作期间显示进度，确认窗口消失或 App 退出后才移除；底部显示完成、不可用和等待提示。
+  超过 12 秒仍未完成时保留原项目并提示检查 App 的确认对话框，也可选择等待中的项目前往查看。
+  删除项目时保持面板位置和当前可见项目的位置，滚动到底部时也避免跳动。
+  关闭最后一个窗口后，松开 Command 不会立即把它重新打开。
 - `Command + Tab` 的前九项显示 `Command + 1-9` 键帽，可直接选中对应项，
   松开 `Command` 后照常切换。
 - 显示正在运行但没有窗口的 App，并可重新打开。
-- Workspace 标题显示用途、所在显示器、当前可见状态和窗口数量。
+  打开后会主动刷新窗口缓存；极快地再次打开列表时，短暂等待新快照，减少旧条目先出现再跳位。
+  新窗口登记期间保留 App 的可操作入口，避免窗口过滤与 App 分类不同步导致项目消失。
+- Workspace 显示当前／可见状态圆点与布局方向图标，右侧保留 D1/D2/D3。
+  悬停图标可查看完整说明；用途标签可选。
 - 列表项标记当前、全屏、浮动和隐藏状态，并在右侧显示 Dock 未读数量、
   麦克风占用和音频播放状态；无法取得具体数量时仍显示红点。
-- 局部半透明浮层，自动跟随 macOS 浅色或深色外观。
+- 原生设置窗口可选择默认或紧凑布局，以及是否显示空工作区；偏好自动保存。
+- 默认窗口行高 34pt、空工作区行高 32pt、App 图标 28pt；紧凑模式分别为 32pt、30pt、26pt。
+  半透明浮层自动跟随 macOS 浅色或深色外观。
 - `Option + Shift + M`：打开窗口控制台，可移动 workspace、切换布局与显示器、
   整理和缩放窗口。数字键移动当前窗口到 workspace 1-10，按住 `Shift` 则移动
   当前 App 的全部窗口。
-- 自动将开发、浏览器、通讯、媒体和设计应用分配到对应 workspace。
-- 通用 workspace 分类，不依赖特定显示器；快速笔记和临时工具自动悬浮。
+- 默认使用中性的数字 workspace，开发者应用自动分配作为可选示例提供。
+- 不依赖特定显示器；快速笔记和临时工具自动悬浮。
 - 画中画和迷你播放器窗口悬浮在当前 workspace。
 - 支持持久 workspace、多显示器分配、焦点循环、独立缩放与窗口整理模式，
   切换显示器时鼠标按需跟随。
+
+## 设置
+
+更新时会保留个人配置；已有用户需要在 `[mode.main.binding]` 中增加搜索快捷键：
+
+```toml
+alt-p = 'exec-and-forget ~/.local/bin/aerospace-window-switcher-trigger --search'
+```
+
+多屏按设备名称分配的示例见 [named-monitors.toml](config/examples/named-monitors.toml)。
+请使用 `aerospace list-monitors` 确认名称，并替换已有分配表，避免重复定义。
+
+点击菜单栏的 AeroSpace Companion 图标，选择「设置…」。也可以直接打开已安装的 App，
+在切换器中按 `Command + ,`，或运行：
+
+```sh
+~/.local/bin/aerospace-window-switcher-trigger --settings
+```
+
+- **列表布局**：默认使用 34pt 窗口行、32pt 空工作区行；紧凑使用 32pt 和 30pt，正文 14pt，
+  同时缩小 App 图标、分组标题与组间距。
+- **显示空工作区**：开启时保留可直接进入的空工作区；关闭时只显示有窗口的工作区。
+  「其他 APP」中的无窗口应用不受此开关影响。
+
+默认使用「默认」布局并显示空工作区。设置自动保存，下次打开切换器时生效；
+Option-Tab 和 Command-Tab 共用同一设置。关闭设置窗口后，切换器继续在后台运行。
 
 ## 环境要求
 
@@ -49,12 +89,12 @@ brew install --cask nikitabobko/tap/aerospace
 curl -fsSL https://raw.githubusercontent.com/tovifun/aerospace-companion/main/scripts/install-online.sh | sh
 ```
 
-安装器会备份当前 AeroSpace 配置、安装仓库配置、在本机编译原生工具并
-重新加载 AeroSpace，同时支持 Apple Silicon 和 Intel Mac。
+首次安装会备份当前 AeroSpace 配置、安装仓库配置、在本机编译原生工具并
+重新加载 AeroSpace。之后在线更新默认保留个人配置。支持 Apple Silicon 和 Intel Mac。
 
 默认配置不绑定任何显示器，使用平铺布局和自动方向；新 workspace 的初始
 方向由 AeroSpace 按屏幕宽高决定。`Option + Enter` 使用 macOS 自带 Terminal，
-无需额外安装终端。应用自动分配在窗口被检测到时执行，已有窗口可手动移动。
+无需额外安装终端。默认不按应用自动搬动窗口，应用分配规则可按需启用。
 
 安装器不会修改 macOS 显示器排列。多屏用户仍需按
 [AeroSpace 的排列要求](https://nikitabobko.github.io/AeroSpace/guide#proper-monitor-arrangement)
@@ -114,35 +154,58 @@ defaults write io.github.tovifun.aerospace-companion.window-switcher \
 ```
 
 将值改为 `false` 即可恢复键盘选中项优先。修改后需重启窗口切换器。
+悬停操作会在按键时重新检测鼠标下的项目，关闭刷新后仍可连续操作。
+即使关闭窗口后 AeroSpace 将焦点交给其他 App，切换器也会继续接收快捷键和滚动输入。
 
 ## 更新
 
-首次安装后，使用下面的命令更新到最新版并应用最新配置：
+首次安装后，使用下面的命令更新辅助工具，保留你的个人配置：
 
 ```bash
 ~/.local/bin/aerospace-companion-update
 ```
 
-每次更新都会先备份当前配置。
+只有显式运行 `~/.local/bin/aerospace-companion-update --with-config`，
+才会备份并替换为最新版通用配置。
 
-## Workspace 自动分配
+## Workspace 与可选分配
 
-| Workspace | 分类 | 应用 |
-| --- | --- | --- |
-| `1` | 媒体和会议 | Music、网易云音乐、汽水音乐、Spotify、VLC、哔哩哔哩、抖音、TV、腾讯会议 |
-| `2` | 浏览和资料 | Chrome、Safari、Edge、Dia、Vivaldi、ChatGPT Atlas、ego lite |
-| `3` | 临时预览 | 不自动分配应用 |
-| `4` | Codex 和编辑器 | Codex、Zed、Cursor、VS Code、Zcode、Xcode |
-| `5` | 终端和 Agent | Terminal、iTerm2、Ghostty、cmux、tty7、Otty、OpenCode |
-| `6` | Git、数据库、API 和诊断 | Fork、DataGrip、Requestly、活动监视器、控制台 |
-| `7` | 设计和内容 | Figma、Eagle、RightFont、OBS、Screen Studio、Audacity、Writer、Typora、Clearly、Lettera、备忘录、文本编辑 |
-| `8` | 沟通和日常速览 | 飞书、微信、企业微信、Mail、Calendar、Reminders |
-| `9` | AI、研究 | Claude、WorkBuddy AI、Grok Bot |
-| `10` | 备用空间 | 不自动分配应用，按需使用 |
+默认保留数字工作区 1–10，不预设职业用途，不按 App 自动分配，也不强制绑定显示器。
+使用 `Option + Control + Tab` 将当前 workspace 移到下一块显示器。
+这是 AeroSpace 原生操作，但不保证每次拔插都精确恢复之前的位置。
 
-Workspace 使用 AeroSpace 默认的显示器分配，不做强制绑定。单屏用户直接使用
-1–10；多屏用户可用 `Option + Control + Tab` 将当前 workspace 移到下一块
-显示器，也可以通过窗口控制台逐个移动窗口。
+喜欢开发者分类的人，可以把[可选规则示例](config/examples/developer-routing.toml)
+中的条目复制到现有 `on-window-detected` 数组内，不要重复定义数组。
+示例分配为：1 媒体、2 浏览、3 编辑器、4 终端、5 开发工具、6 沟通、
+7 内容、8 AI；9 和 10 手动使用。示例不包含任何显示器绑定。
+
+示例数组开头还有一条与 App 无关的守卫规则：
+
+```toml
+{ if = 'test %{window-layout} = floating', run = 'layout floating' },
+```
+
+由于 `on-window-detected` 命中第一条规则后即停止，这条规则会让 AeroSpace 已判定为
+浮动（floating）的窗口——对话框、快捷搜索、面板、文件选择器等——停留在打开时所在
+的工作区，而不会被拖到 App 对应的工作区。它必须放在所有有意移动浮动窗口的规则之后
+（例如画中画规则），并在 App 路由规则之前。无需为每个 App 写例外。
+
+界面用途标签独立设置，不影响窗口分配，例如：
+
+```bash
+defaults write io.github.tovifun.aerospace-companion.window-switcher \
+  workspaceLabels -dict 1 媒体 2 浏览 3 开发 4 终端 6 沟通
+```
+
+修改后重启切换器。未设置标签的工作区仍显示中性名称。
+运行 `defaults delete io.github.tovifun.aerospace-companion.window-switcher workspaceLabels`
+可恢复默认标签。个人 App 规则和显示器分配留在本机 AeroSpace 配置中，普通更新不会覆盖。
+
+另有[笔记本＋顺序屏幕分配示例](config/examples/laptop-ordered-monitors.toml)：
+1 在笔记本，2–8 在第 2 块屏，9–10 优先第 3 块、缺屏回退第 2 块，
+也就是竖屏第 3 块屏承载两个工作区。
+它要求两处保持「笔记本、工作屏、可选第三屏」从左到右排列，不依赖 macOS 主显示器。
+该示例默认不安装；改变排列或合盖会改变屏幕编号。启用强制分配后，不能再手动搬动整个工作区到另一屏。
 
 ## 常用快捷键
 

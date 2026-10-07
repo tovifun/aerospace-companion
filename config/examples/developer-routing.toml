@@ -1,0 +1,88 @@
+# Optional developer routing. Copy these entries into your existing
+# on-window-detected array; do not add a second array with the same name.
+# No monitor assignments are included. Existing windows are not relocated.
+#
+# The first entry is an app-agnostic guard: on-window-detected stops at the first
+# matching rule, so any window AeroSpace already treats as floating (dialogs,
+# quick-search bars, panels, file pickers) stays on its current workspace instead
+# of being dragged to an app workspace. Keep it after any rule that intentionally
+# relocates a floating window (e.g. picture-in-picture), and before app routing.
+on-window-detected = [
+    # App-agnostic guard: floating/dialog windows are never routed.
+    { if = 'test %{window-layout} = floating', run = 'layout floating' },
+
+    # Workspace 1: music, video, and calls.
+    { if = 'test %{app-bundle-id} = com.apple.Music', run = 'move-node-to-workspace 1' },
+    { if = 'test %{app-bundle-id} = com.netease.163music', run = 'move-node-to-workspace 1' },
+    { if = 'test %{app-bundle-id} = com.soda.music', run = 'move-node-to-workspace 1' },
+    { if = 'test %{app-bundle-id} = com.spotify.client', run = 'move-node-to-workspace 1' },
+    { if = 'test %{app-bundle-id} = org.videolan.vlc', run = 'move-node-to-workspace 1' },
+    { if = 'test %{app-bundle-id} = com.bilibili.bilibiliPC', run = 'move-node-to-workspace 1' },
+    { if = 'test %{app-bundle-id} = com.bytedance.douyin.desktop', run = 'move-node-to-workspace 1' },
+    { if = 'test %{app-bundle-id} = com.apple.TV', run = 'move-node-to-workspace 1' },
+    { if = 'test %{app-bundle-id} = com.tencent.meeting', run = 'move-node-to-workspace 1' },
+
+    # Workspace 2: browsers and reference material.
+    { if = 'test %{app-bundle-id} = com.google.Chrome', run = 'move-node-to-workspace 2' },
+    { if = 'test %{app-bundle-id} = com.apple.Safari', run = 'move-node-to-workspace 2' },
+    { if = 'test %{app-bundle-id} = com.microsoft.edgemac', run = 'move-node-to-workspace 2' },
+    { if = 'test %{app-bundle-id} = company.thebrowser.dia', run = 'move-node-to-workspace 2' },
+    { if = 'test %{app-bundle-id} = com.vivaldi.Vivaldi', run = 'move-node-to-workspace 2' },
+    { if = 'test %{app-bundle-id} = com.vivaldi.Vivaldi.snapshot', run = 'move-node-to-workspace 2' },
+    { if = 'test %{app-bundle-id} = com.openai.atlas', run = 'move-node-to-workspace 2' },
+    { if = 'test %{app-bundle-id} = com.citrolabs.ego.lite', run = 'move-node-to-workspace 2' },
+
+    # Workspace 3: Codex and editors.
+    { if = 'test %{app-bundle-id} = com.openai.codex', run = 'move-node-to-workspace 3' },
+    { if = 'test %{app-bundle-id} = dev.zed.Zed', run = 'move-node-to-workspace 3' },
+    { if = 'test %{app-bundle-id} = com.todesktop.230313mzl4w4u92', run = 'move-node-to-workspace 3' },
+    { if = 'test %{app-bundle-id} = com.microsoft.VSCode', run = 'move-node-to-workspace 3' },
+    { if = 'test %{app-bundle-id} = dev.zcode.app', run = 'move-node-to-workspace 3' },
+    { if = 'test %{app-bundle-id} = com.apple.dt.Xcode', run = 'move-node-to-workspace 3' },
+
+    # Workspace 4: terminals and coding agents.
+    { if = 'test %{app-bundle-id} = com.apple.Terminal', run = 'move-node-to-workspace 4' },
+    { if = 'test %{app-bundle-id} = com.googlecode.iterm2', run = 'move-node-to-workspace 4' },
+    { if = 'test %{app-bundle-id} = com.mitchellh.ghostty', run = 'move-node-to-workspace 4' },
+    { if = 'test %{app-bundle-id} = com.cmuxterm.app', run = 'move-node-to-workspace 4' },
+    { if = 'test %{app-bundle-id} = com.github.tty7', run = 'move-node-to-workspace 4' },
+    { if = 'test %{app-bundle-id} = io.appmakes.otty', run = 'move-node-to-workspace 4' },
+    { if = 'test %{app-bundle-id} = ai.opencode.desktop', run = 'move-node-to-workspace 4' },
+
+    # Workspace 5: Git, databases, API, and diagnostics.
+    { if = 'test %{app-bundle-id} = com.DanPristupov.Fork', run = 'move-node-to-workspace 5' },
+    { if = 'test %{app-bundle-id} = com.jetbrains.datagrip', run = 'move-node-to-workspace 5' },
+    { if = 'test %{app-bundle-id} = com.requestly.api-client', run = 'move-node-to-workspace 5' },
+    { if = 'test %{app-bundle-id} = com.apple.ActivityMonitor', run = 'move-node-to-workspace 5' },
+    { if = 'test %{app-bundle-id} = com.apple.Console', run = 'move-node-to-workspace 5' },
+
+    # Workspace 6: communication and daily tasks.
+    { if = 'test %{app-bundle-id} = com.electron.lark', run = 'move-node-to-workspace 6' },
+    { if = 'test %{app-bundle-id} = com.tencent.xinWeChat', run = 'move-node-to-workspace 6' },
+    { if = 'test %{app-bundle-id} = com.tencent.WeWorkMac', run = 'move-node-to-workspace 6' },
+    { if = 'test %{app-bundle-id} = com.apple.mail', run = 'move-node-to-workspace 6' },
+    { if = 'test %{app-bundle-id} = com.apple.iCal', run = 'move-node-to-workspace 6' },
+    { if = 'test %{app-bundle-id} = com.apple.reminders', run = 'move-node-to-workspace 6' },
+
+    # Workspace 7: design, content production, and long-form writing.
+    { if = 'test %{app-bundle-id} = com.figma.Desktop', run = 'move-node-to-workspace 7' },
+    { if = 'test %{app-bundle-id} = tw.ogdesign.eagle', run = 'move-node-to-workspace 7' },
+    { if = 'test %{app-bundle-id} = com.rightfontapp.RightFont5', run = 'move-node-to-workspace 7' },
+    { if = 'test %{app-bundle-id} = com.obsproject.obs-studio', run = 'move-node-to-workspace 7' },
+    { if = 'test %{app-bundle-id} = com.timpler.screenstudio', run = 'move-node-to-workspace 7' },
+    { if = 'test %{app-bundle-id} = org.audacityteam.audacity', run = 'move-node-to-workspace 7' },
+    { if = 'test %{app-bundle-id} = pro.writer.mac', run = 'move-node-to-workspace 7' },
+    { if = 'test %{app-bundle-id} = abnerworks.Typora', run = 'move-node-to-workspace 7' },
+    { if = 'test %{app-bundle-id} = com.sabotage.clearly', run = 'move-node-to-workspace 7' },
+    { if = 'test %{app-bundle-id} = net.shinyfrog.lettera', run = 'move-node-to-workspace 7' },
+    { if = 'test %{app-bundle-id} = com.apple.Notes', run = 'move-node-to-workspace 7' },
+    { if = 'test %{app-bundle-id} = com.apple.TextEdit', run = 'move-node-to-workspace 7' },
+
+    # Workspace 8: AI assistants and research.
+    { if = 'test %{app-bundle-id} = com.anthropic.claudefordesktop', run = 'move-node-to-workspace 8' },
+    { if = 'test %{app-bundle-id} = com.workbuddy.workbuddy-ai', run = 'move-node-to-workspace 8' },
+    { if = 'test %{app-bundle-id} = com.anysphere.sand', run = 'move-node-to-workspace 8' },
+
+    # Workspaces 9 and 10 are reserved for manual organization.
+
+]

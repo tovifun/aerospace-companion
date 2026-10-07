@@ -8,6 +8,9 @@ macOS, with an AltTab-style window switcher and a compact window control panel.
 ## Features
 
 - `Option + Tab`: browse windows grouped by AeroSpace workspace.
+- Empty AeroSpace workspaces appear as compact single rows in both Option-Tab
+  and Command-Tab. Select one and release the held modifier, or click it, to switch
+  without opening an app. Both shortcuts share the same list and ordering.
 - `Option + Shift + Tab`: browse in reverse.
 - `Command + Tab`: use the same window switcher instead of the macOS app switcher
   while AeroSpace is running (Accessibility and Input Monitoring permissions
@@ -15,25 +18,72 @@ macOS, with an AltTab-style window switcher and a compact window control panel.
 - Mouse hover feedback without changing the keyboard selection; click to switch.
 - While holding `Command`, press `Command + W` to close the selected window or
   `Command + Q` to quit its app without leaving the switcher.
+  Rows show progress until the window disappears or the app finishes quitting.
+  The footer confirms completion, explains unavailable actions, and flags requests
+  still waiting after 12 seconds. Select a waiting item to check its app for a dialog.
+  Closing items preserves the visible rows and panel position, including at the end
+  of a scrolled list. Releasing Command after closing the last window does not reopen it.
 - The first nine `Command + Tab` results show `Command + 1-9` keycaps for
   direct selection; release `Command` to switch as usual.
 - Running apps without windows are included and can be reopened.
-- Semantic workspace headers include the display, visibility, and window count.
+  Reopening warms the window catalog in the background. Very fast re-entry waits
+  briefly for the new snapshot instead of flashing the stale windowless row;
+  apps remain available while their windows are being registered.
+- Workspaces show filled/outlined status dots and directional layout icons;
+  compact display IDs (D1/D2/D3) stay at the right. Hover for full
+  descriptions; custom labels are optional.
 - Rows identify the current, fullscreen, floating, and hidden states. Dock
   unread counts, active microphone input, and audio output appear at the right
   edge; badges without a numeric count fall back to a red dot.
-- Compact translucent panel that follows the macOS light or dark appearance.
+- Native settings for default/compact layout and empty workspace visibility,
+  with preferences saved automatically.
+- Default layout uses 34-point window rows, 32-point empty workspace rows, and
+  28-point app icons; compact uses 32, 30, and 26 points respectively. The translucent
+  panel follows the macOS light or dark appearance.
 - `Option + Shift + M`: open Window Control for workspace moves, layouts,
   displays, arranging, and resizing. Number keys move the current window to
   workspace 1-10; hold `Shift` to move every window of the current app.
-- Automatic app routing for development, browsers, communication, media, and
-  design workspaces.
-- General-purpose workspaces without hardware-specific display assignments;
+- Neutral numbered workspaces with opt-in developer app routing examples.
+- No hardware-specific display assignments;
   quick-note and transient utility windows remain floating.
 - Picture-in-Picture and mini-player windows stay floating on the current
   workspace.
 - Persistent workspaces, directional display controls, focus wrapping, dedicated
   resize and arrange modes, and lazy mouse movement between displays.
+
+## Settings
+
+Press `Option + P` to search windows across all workspaces by app, title, workspace
+number/label, or display name. Separate keywords with spaces. Use Up/Down to select,
+Enter to switch, and Escape to cancel. The search stays open after releasing Option;
+the existing Option-Tab and Command-Tab behavior is unchanged. The menu bar also
+offers **Search windows…**.
+
+Updates preserve personal configurations. Add this under `[mode.main.binding]`:
+
+```toml
+alt-p = 'exec-and-forget ~/.local/bin/aerospace-window-switcher-trigger --search'
+```
+
+See [named-monitors.toml](config/examples/named-monitors.toml) for a display-name
+assignment example that keeps device roles when closing the lid or unplugging a
+monitor. Check names with `aerospace list-monitors` and replace the existing table.
+
+Click the AeroSpace Companion menu bar icon and choose **Settings…**. You can also
+open the installed app, press `Command + ,` in the switcher, or run:
+
+```sh
+~/.local/bin/aerospace-window-switcher-trigger --settings
+```
+
+- **List layout**: Default uses 34-point window rows and 32-point empty workspace
+  rows. Compact uses 32 and 30 points, with 14-point text, 26-point icons, smaller headers, and group gaps.
+- **Show empty workspaces**: Include directly selectable empty workspaces, or show
+  only occupied workspaces. Windowless apps in **OTHER APPS** are unaffected.
+
+The initial settings are Default layout with empty workspaces shown. Changes are
+saved automatically and applied the next time you open the switcher. Option-Tab
+and Command-Tab share these settings. Closing Settings leaves the switcher running.
 
 ## Requirements
 
@@ -53,9 +103,10 @@ Install or update everything with one command:
 curl -fsSL https://raw.githubusercontent.com/tovifun/aerospace-companion/main/scripts/install-online.sh | sh
 ```
 
-The installer backs up the active AeroSpace config, installs the included
-configuration, builds the native tools locally, and reloads AeroSpace. It
-supports both Apple Silicon and Intel Macs.
+On first installation, the installer backs up the active AeroSpace config,
+installs the included configuration, builds the native tools locally, and reloads
+AeroSpace. Subsequent online updates preserve your config. Both Apple Silicon
+and Intel Macs are supported.
 
 For a manual checkout:
 
@@ -117,46 +168,73 @@ defaults write io.github.tovifun.aerospace-companion.window-switcher \
 
 Set the value to `false` to restore keyboard-selection priority. Restart the
 window switcher after changing it.
+Hover actions resolve the item under the pointer at key-down, including after a
+close refresh. Command shortcuts and scrolling continue working when AeroSpace
+focuses another app after a window closes.
 
 ## Update
 
-After the first installation, update to the latest version and apply its config:
+After the first installation, update the tools while keeping your personal config:
 
 ```bash
 ~/.local/bin/aerospace-companion-update
 ```
 
-Updates back up the current config before replacing it.
+To explicitly replace your config with the latest generic defaults (a backup is made),
+run `~/.local/bin/aerospace-companion-update --with-config`.
 
-## Workspace Routing
+## Workspaces and optional routing
 
-The default configuration uses tiles with automatic orientation and no forced
-display assignments. AeroSpace chooses a new workspace's initial orientation
-from the display's aspect ratio. App routing runs when windows are detected;
-existing windows can be moved manually. No additional terminal is required.
+The default uses numbered workspaces 1–10, tiles, and automatic initial
+orientation, with no forced display assignments or app-to-workspace routing.
+New windows are not moved to a numbered workspace by Companion rules.
 
-The installer does not rearrange macOS displays.
-Follow [AeroSpace's monitor arrangement guidance](https://nikitabobko.github.io/AeroSpace/guide#proper-monitor-arrangement)
-to leave room for hidden windows. Badge counts and audio status depend on the
-information available from the OS and applications.
+Use `Option + Control + Tab` to move the current workspace to the next display.
+AeroSpace does not guarantee exact placement restoration after every hotplug.
+The installer does not rearrange macOS displays; follow
+[AeroSpace's monitor arrangement guidance](https://nikitabobko.github.io/AeroSpace/guide#proper-monitor-arrangement)
+to leave room for hidden windows.
 
-| Workspace | Category | Apps |
-| --- | --- | --- |
-| `1` | Media and calls | Music, NetEase Music, Soda Music, Spotify, VLC, Bilibili, Douyin, TV, Tencent Meeting |
-| `2` | Browsers and reference | Chrome, Safari, Edge, Dia, Vivaldi, ChatGPT Atlas, ego lite |
-| `3` | Temporary and preview | No automatic routing |
-| `4` | Codex and editors | Codex, Zed, Cursor, VS Code, Zcode, Xcode |
-| `5` | Terminals and agents | Terminal, iTerm2, Ghostty, cmux, tty7, Otty, OpenCode |
-| `6` | Git, databases, API, and diagnostics | Fork, DataGrip, Requestly, Activity Monitor, Console |
-| `7` | Design and content | Figma, Eagle, RightFont, OBS, Screen Studio, Audacity, Writer, Typora, Clearly, Lettera, Notes, TextEdit |
-| `8` | Communication and daily glance | Feishu, WeChat, WeCom, Mail, Calendar, Reminders |
-| `9` | AI and research | Claude, WorkBuddy AI, Grok Bot |
-| `10` | Extra workspace | No automatic routing; available for manual organization |
+For an opinionated developer setup, copy the entries from
+[the optional routing example](config/examples/developer-routing.toml) into
+your existing `on-window-detected` array. Do not create a second array.
+It assigns media to 1, browsers to 2, editors to 3, terminals to 4,
+development tools to 5, communication to 6, content to 7, and AI to 8;
+9 and 10 remain manual. It contains no monitor bindings.
 
-Workspaces use AeroSpace's default display placement. Use workspaces 1-10 on
-a single display, or press `Option + Control + Tab` to move the current workspace
-to the next display. Window Control also supports moving individual windows
-between displays.
+The example also starts with an app-agnostic guard rule:
+
+```toml
+{ if = 'test %{window-layout} = floating', run = 'layout floating' },
+```
+
+Because `on-window-detected` stops at the first matching rule, this keeps every
+window AeroSpace already treats as floating (dialogs, quick-search bars, panels,
+file pickers) on the workspace where it was opened, instead of dragging it to an
+app's workspace. Place it after any rule that intentionally moves a floating
+window (for example a picture-in-picture rule) and before the app routing rules.
+No per-app exceptions are needed.
+
+Labels are optional and independent of routing. For example:
+
+```bash
+defaults write io.github.tovifun.aerospace-companion.window-switcher \
+  workspaceLabels -dict 1 Media 2 Browse 3 Code 4 Terminal 6 Chat
+```
+
+Restart the switcher after changing labels. Unspecified workspaces retain neutral
+names. To reset, use `defaults delete io.github.tovifun.aerospace-companion.window-switcher workspaceLabels`.
+Keep personal app and monitor rules in your active AeroSpace config; ordinary
+updates will preserve them. Badge counts and audio status depend on information
+available from the OS and applications.
+
+An optional [laptop + ordered displays example](config/examples/laptop-ordered-monitors.toml)
+puts workspace 1 on the laptop, 2–8 on the second display, and 9–10 on the
+third display with fallback to the second, so a portrait third display holds two
+workspaces. It requires the same left-to-right
+arrangement at each location, not a particular macOS main display. It is not
+installed by default; monitor numbers change when displays are rearranged or
+the laptop is closed. Forced assignments disable manual whole-workspace moves.
 
 ## Key Bindings
 

@@ -27,7 +27,12 @@ if [ -z "$source_dir" ] || [ ! -x "$source_dir/scripts/install.sh" ]; then
 fi
 
 if [ "$#" -eq 0 ]; then
-    set -- --with-config
+    install_root=${AEROSPACE_COMPANION_HOME:-"$HOME/.local/share/aerospace-companion"}
+    if [ ! -f "$install_root/install-state" ]; then
+        set -- --with-config
+    else
+        printf 'Updating tools only; preserving your AeroSpace configuration.\n'
+    fi
 fi
 
 "$source_dir/scripts/install.sh" "$@"

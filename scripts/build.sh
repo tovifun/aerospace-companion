@@ -42,6 +42,18 @@ xcrun swiftc \
     -framework CoreAudio \
     -framework QuartzCore \
     "$root_dir/src/window-switcher/main.swift" \
+    "$root_dir/src/window-switcher/Localization.swift" \
+    "$root_dir/src/window-switcher/SwitcherPreferences.swift" \
+    "$root_dir/src/window-switcher/SettingsWindowController.swift" \
+    "$root_dir/src/window-switcher/WorkspaceHeaderMetadata.swift" \
+    "$root_dir/src/window-switcher/WorkspaceCatalog.swift" \
+    "$root_dir/src/window-switcher/WindowDisplayTitle.swift" \
+    "$root_dir/src/window-switcher/SwitcherScroll.swift" \
+    "$root_dir/src/window-switcher/SwitcherActions.swift" \
+    "$root_dir/src/window-switcher/SwitcherReopenTracker.swift" \
+    "$root_dir/src/window-switcher/SwitcherActionFeedback.swift" \
+    "$root_dir/src/window-switcher/WindowSearch.swift" \
+    "$root_dir/src/window-switcher/WindowSearchController.swift" \
     -o "$app/Contents/MacOS/aerospace-window-switcher"
 
 xcrun swiftc \

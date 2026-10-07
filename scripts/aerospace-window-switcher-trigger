@@ -11,12 +11,16 @@ binary="$app/Contents/MacOS/aerospace-window-switcher"
 direction=${1:---forward}
 
 case "$direction" in
-    --forward|--reverse|--daemon) ;;
+    --forward|--reverse|--daemon|--settings|--search) ;;
     *)
-        printf 'Usage: %s [--forward|--reverse|--daemon]\n' "$0" >&2
+        printf 'Usage: %s [--forward|--reverse|--daemon|--settings|--search]\n' "$0" >&2
         exit 2
         ;;
 esac
+
+if [ "$direction" = "--settings" ]; then
+    exec /usr/bin/open "$app" --args --settings
+fi
 
 if [ -r "$pid_file" ]; then
     pid=$(/bin/cat "$pid_file" 2>/dev/null)
@@ -30,6 +34,8 @@ if [ -r "$pid_file" ]; then
                         exit 0
                     elif [ "$direction" = "--reverse" ]; then
                         signal=USR2
+                    elif [ "$direction" = "--search" ]; then
+                        signal=WINCH
                     else
                         signal=USR1
                     fi

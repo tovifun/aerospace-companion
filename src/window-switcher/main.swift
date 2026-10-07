@@ -13,6 +13,8 @@ private let runtimeIdentifier = "io.github.tovifun.aerospace-companion.window-sw
 private let runtimeRootPath = "\(NSHomeDirectory())/.local/share/aerospace-companion/runtime"
 private let runtimePathPrefix = "\(runtimeRootPath)/\(runtimeIdentifier).\(getuid())"
 private let cycleNotificationName = Notification.Name("\(runtimeIdentifier).cycle")
+private let settingsNotificationName = Notification.Name("\(runtimeIdentifier).settings")
+private let searchNotificationName = Notification.Name("\(runtimeIdentifier).search")
 private let singletonLockPath = "\(runtimePathPrefix).lock"
 private let daemonPIDPath = "\(runtimePathPrefix).pid"
 private let commandTabStatusPath = "\(runtimePathPrefix).command-tab-status"
@@ -20,28 +22,32 @@ private let commandTabStatusPath = "\(runtimePathPrefix).command-tab-status"
 private enum SwitcherConfiguration {
     static let hoveredItemActionPriorityKey = "hoveredItemActionPriority"
 
+    static func workspaceLabel(_ workspace: String) -> String? {
+        let labels = UserDefaults.standard.dictionary(forKey: "workspaceLabels")
+        guard let label = labels?[workspace] as? String else { return nil }
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     static var hoveredItemActionPriority: Bool {
         UserDefaults.standard.bool(forKey: hoveredItemActionPriorityKey)
     }
 }
 
-private func localized(_ english: String, _ chinese: String) -> String {
-    let preferredLanguage = Locale.preferredLanguages.first ?? "en"
-    return preferredLanguage.hasPrefix("zh") ? chinese : english
-}
-
 private enum SwitcherStyle {
+    static var metrics: SwitcherLayoutMetrics { SwitcherPreferences.shared.layoutMode.metrics }
     static let maximumPanelHeight: CGFloat = 960
     static let panelScreenInset: CGFloat = 16
     static let surfaceCornerRadius: CGFloat = 18
     static let rowCornerRadius: CGFloat = 8
     static let shadowMargin: CGFloat = 24
     static let contentPadding: CGFloat = 8
-    static let groupSpacing: CGFloat = 4
-    static let groupHeaderHeight: CGFloat = 21
-    static let rowSpacing: CGFloat = 0
-    static let rowHeight: CGFloat = 38
-    static let iconSize: CGFloat = 32
+    static var groupSpacing: CGFloat { metrics.groupSpacing }
+    static var groupHeaderHeight: CGFloat { metrics.groupHeaderHeight }
+    static var rowSpacing: CGFloat { metrics.rowSpacing }
+    static var rowHeight: CGFloat { metrics.rowHeight }
+    static var emptyWorkspaceRowHeight: CGFloat { metrics.emptyWorkspaceRowHeight }
+    static var iconSize: CGFloat { metrics.iconSize }
     static let accentColor = NSColor(
         srgbRed: 0.20,
         green: 0.43,
@@ -50,7 +56,7 @@ private enum SwitcherStyle {
     )
 }
 
-private struct AeroWindow: Decodable {
+private struct AeroWindow: Decodable, Equatable {
     let windowID: Int
     let appName: String
     let appBundleID: String
@@ -59,6 +65,7 @@ private struct AeroWindow: Decodable {
     let windowTitle: String
     let isFullscreen: Bool
     let windowLayout: String
+    let workspaceLayout: String?
     let workspaceIsFocused: Bool
     let workspaceIsVisible: Bool
     let monitorID: Int
@@ -73,6 +80,7 @@ private struct AeroWindow: Decodable {
         case windowTitle = "window-title"
         case isFullscreen = "window-is-fullscreen"
         case windowLayout = "window-layout"
+        case workspaceLayout = "workspace-root-container-layout"
         case workspaceIsFocused = "workspace-is-focused"
         case workspaceIsVisible = "workspace-is-visible"
         case monitorID = "monitor-id"
@@ -86,16 +94,17 @@ private struct WorkspaceGroup {
     let isVisible: Bool
     let monitorID: Int
     let monitorName: String
+    let layout: String?
     var windows: [AeroWindow]
 }
 
-private struct RunningApp {
+private struct RunningApp: Equatable {
     let processIdentifier: pid_t
     let appName: String
     let bundleIdentifier: String
 }
 
-private struct DockBadgeStatus {
+private struct DockBadgeStatus: Equatable {
     let rawLabel: String
 
     var displayCount: String? {
@@ -108,7 +117,7 @@ private struct DockBadgeStatus {
     }
 }
 
-private struct DockBadgeSnapshot {
+private struct DockBadgeSnapshot: Equatable {
     static let empty = DockBadgeSnapshot(bundleIdentifiers: [:], appNames: [:])
 
     let bundleIdentifiers: [String: DockBadgeStatus]
@@ -212,7 +221,7 @@ private enum DockBadgeClient {
     }
 }
 
-private struct AudioActivitySnapshot {
+private struct AudioActivitySnapshot: Equatable {
     static let empty = AudioActivitySnapshot(
         inputProcessIdentifiers: [],
         inputBundleIdentifiers: [],
@@ -389,6 +398,7 @@ private enum AudioActivityClient {
 private enum SwitcherItem {
     case window(AeroWindow)
     case application(RunningApp)
+    case workspace(WorkspaceGroup)
 
     var key: String {
         switch self {
@@ -396,6 +406,8 @@ private enum SwitcherItem {
             return "window:\(window.windowID)"
         case .application(let app):
             return "application:\(app.processIdentifier)"
+        case .workspace(let group):
+            return "workspace:\(group.workspace)"
         }
     }
 }
@@ -433,7 +445,7 @@ private enum AeroSpaceClient {
         executablePaths.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
-    static func allWindows() throws -> [AeroWindow] {
+    static func allWindows(validatingReopenedPIDs: Set<pid_t> = []) throws -> [AeroWindow] {
         let format = [
             "%{window-id}",
             "%{app-name}",
@@ -443,6 +455,7 @@ private enum AeroSpaceClient {
             "%{window-title}",
             "%{window-is-fullscreen}",
             "%{window-layout}",
+            "%{workspace-root-container-layout}",
             "%{workspace-is-focused}",
             "%{workspace-is-visible}",
             "%{monitor-id}",
@@ -450,16 +463,56 @@ private enum AeroSpaceClient {
         ].joined(separator: " ")
         let data = try run(["list-windows", "--all", "--json", "--format", format])
         let windows = try JSONDecoder().decode([AeroWindow].self, from: data)
-        return excludingStaleUntitledWindows(windows)
+        return excludingStaleUntitledWindows(windows, additionallyValidating: validatingReopenedPIDs)
+    }
+
+    static func allWorkspaces() throws -> [AeroWorkspace] {
+        let format = [
+            "%{workspace}", "%{workspace-is-focused}", "%{workspace-is-visible}",
+            "%{monitor-id}", "%{monitor-name}", "%{workspace-root-container-layout}",
+        ].joined(separator: " ")
+        return try JSONDecoder().decode(
+            [AeroWorkspace].self,
+            from: run(["list-workspaces", "--all", "--json", "--format", format])
+        )
+    }
+
+    static func activateWorkspace(_ workspace: String, completion: @escaping (Error?) -> Void) {
+        DispatchQueue.global(qos: .userInteractive).async {
+            do {
+                _ = try run(["workspace", "--", workspace])
+                DispatchQueue.main.async { completion(nil) }
+            } catch {
+                DispatchQueue.main.async { completion(error) }
+            }
+        }
+    }
+
+    static func activateSearchWindow(_ windowID: Int, completion: @escaping (Error?) -> Void) {
+        DispatchQueue.global(qos: .userInteractive).async {
+            do {
+                // Resolve the workspace again: a result can move or close while
+                // the user types. Never activate an unrelated stale workspace.
+                guard let window = try allWindows().first(where: { $0.windowID == windowID }) else {
+                    throw NSError(domain: runtimeIdentifier, code: 1,
+                                  userInfo: [NSLocalizedDescriptionKey: "Window is no longer available"])
+                }
+                _ = try run(["workspace", "--", window.workspace])
+                _ = try run(["focus", "--window-id", String(windowID)])
+                DispatchQueue.main.async { completion(nil) }
+            } catch {
+                DispatchQueue.main.async { completion(error) }
+            }
+        }
     }
 
     private static func excludingStaleUntitledWindows(
-        _ windows: [AeroWindow]
+        _ windows: [AeroWindow], additionallyValidating processIdentifiers: Set<pid_t>
     ) -> [AeroWindow] {
         let hasUntitledWindows = windows.contains {
             $0.windowTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
-        guard hasUntitledWindows else { return windows }
+        guard hasUntitledWindows || windows.contains(where: { processIdentifiers.contains($0.appPID) }) else { return windows }
 
         guard let windowDescriptions = CGWindowListCopyWindowInfo(
             [.optionAll, .excludeDesktopElements],
@@ -481,11 +534,18 @@ private enum AeroSpaceClient {
             liveWindowOwners[windowID.intValue] = pid_t(ownerPID.int32Value)
         }
 
-        return windows.filter { window in
+        return matchingLiveWindows(windows, validating: processIdentifiers, liveWindowOwners: liveWindowOwners)
+    }
+
+    private static func matchingLiveWindows(
+        _ windows: [AeroWindow], validating processIdentifiers: Set<pid_t>, liveWindowOwners: [Int: pid_t]
+    ) -> [AeroWindow] {
+        windows.filter { window in
             let isUntitled = window.windowTitle
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .isEmpty
-            return !isUntitled || liveWindowOwners[window.windowID] == window.appPID
+            let needsValidation = isUntitled || processIdentifiers.contains(window.appPID)
+            return !needsValidation || liveWindowOwners[window.windowID] == window.appPID
         }
     }
 
@@ -1284,24 +1344,14 @@ private final class WindowControlPanelController {
     }
 
     private func workspaceShortName(_ workspace: String) -> String {
-        switch workspace {
-        case "1": return localized("Media", "媒体会议")
-        case "2": return localized("Browse", "浏览资料")
-        case "3": return localized("Temp", "临时预览")
-        case "4": return localized("Code", "Codex 编辑器")
-        case "5": return localized("Terminal", "终端 Agent")
-        case "6": return localized("Dev Tools", "开发辅助")
-        case "7": return localized("Content", "设计内容")
-        case "8": return localized("Comms", "沟通")
-        case "9": return localized("AI", "AI 研究")
-        case "10": return localized("Extra", "备用空间")
-        default: return workspace
-        }
+        SwitcherConfiguration.workspaceLabel(workspace)
+            ?? localized("Workspace", "工作区")
     }
 
     private func workspaceDisplayName(_ workspace: String) -> String {
-        localized("Workspace \(workspace)", "Workspace \(workspace)")
-            + " · " + workspaceShortName(workspace)
+        let title = localized("Workspace \(workspace)", "工作区 \(workspace)")
+        return SwitcherConfiguration.workspaceLabel(workspace).map { title + " · " + $0 }
+            ?? title
     }
 
     private func localizedLayout(_ layout: String) -> String {
@@ -1532,11 +1582,15 @@ private final class GlassTintView: NSView {
 
 private final class ActionRow: NSControl {
     var onClick: (() -> Void)?
-    var onHoverChanged: ((Bool) -> Void)?
+    var onHoverChanged: ((NSPoint) -> Void)?
     var normalColor = NSColor.clear {
         didSet { updateAppearance() }
     }
     var isSelected = false {
+        didSet { if isSelected != oldValue { updateAppearance() } }
+    }
+
+    var pendingMessage: String? {
         didSet { updateAppearance() }
     }
 
@@ -1544,6 +1598,7 @@ private final class ActionRow: NSControl {
     private var isHovered = false
     private weak var primaryLabel: NSTextField?
     private weak var secondaryLabel: NSTextField?
+    private var primaryLabelColor: NSColor = .labelColor
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -1575,15 +1630,25 @@ private final class ActionRow: NSControl {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        isHovered = true
-        updateAppearance()
-        onHoverChanged?(true)
+        if let onHoverChanged {
+            onHoverChanged(event.locationInWindow)
+        } else {
+            setHovered(true)
+        }
     }
 
     override func mouseExited(with event: NSEvent) {
-        isHovered = false
+        if let onHoverChanged {
+            onHoverChanged(event.locationInWindow)
+        } else {
+            setHovered(false)
+        }
+    }
+
+    func setHovered(_ hovered: Bool) {
+        guard isHovered != hovered else { return }
+        isHovered = hovered
         updateAppearance()
-        onHoverChanged?(false)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -1603,30 +1668,40 @@ private final class ActionRow: NSControl {
         return true
     }
 
-    func registerLabels(primary: NSTextField, secondary: NSTextField? = nil) {
+    func registerLabels(
+        primary: NSTextField, secondary: NSTextField? = nil,
+        primaryColor: NSColor = .labelColor
+    ) {
         primaryLabel = primary
         secondaryLabel = secondary
+        primaryLabelColor = primaryColor
         updateAppearance()
     }
 
     private func updateAppearance() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
         effectiveAppearance.performAsCurrentDrawingAppearance {
             let color: NSColor
             if isSelected {
                 color = SwitcherStyle.accentColor.withAlphaComponent(0.18)
-                primaryLabel?.textColor = .labelColor
+                primaryLabel?.textColor = primaryLabelColor
                 secondaryLabel?.textColor = .secondaryLabelColor
             } else if isHovered {
                 color = NSColor.labelColor.withAlphaComponent(0.065)
-                primaryLabel?.textColor = .labelColor
+                primaryLabel?.textColor = primaryLabelColor
                 secondaryLabel?.textColor = .secondaryLabelColor
             } else {
                 color = normalColor
-                primaryLabel?.textColor = .labelColor
+                primaryLabel?.textColor = primaryLabelColor
                 secondaryLabel?.textColor = .secondaryLabelColor
             }
             layer?.backgroundColor = color.cgColor
-            setAccessibilityValue(isSelected ? "Selected" : nil)
+            layer?.borderWidth = pendingMessage == nil ? 0 : 1
+            layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.25).cgColor
+            if pendingMessage != nil { primaryLabel?.textColor = .secondaryLabelColor }
+            setAccessibilityValue([isSelected ? "Selected" : nil, pendingMessage].compactMap { $0 }.joined(separator: ", "))
         }
     }
 
@@ -1924,11 +1999,19 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var globalMagnifyMonitor: Any?
     private weak var switcherScrollView: NSScrollView?
     private var cycleObserver: NSObjectProtocol?
+    private var settingsObserver: NSObjectProtocol?
+    private var searchObserver: NSObjectProtocol?
+    private var applicationTerminationObserver: NSObjectProtocol?
+    private var statusItem: NSStatusItem?
+    private var settingsController: SettingsWindowController?
     private var forwardSignalSource: DispatchSourceSignal?
     private var reverseSignalSource: DispatchSourceSignal?
     private var windowControlSignalSource: DispatchSourceSignal?
+    private var searchSignalSource: DispatchSourceSignal?
+    private var windowSearchController: WindowSearchController?
     private var commandTabEventTap: CFMachPort?
     private var commandTabRunLoopSource: CFRunLoopSource?
+    private var capturedSwitcherKeyCodes: Set<Int64> = []
     private var commandTabRetryTimer: Timer?
     private var permissionGuide: PermissionGuideWindowController?
     private var didPresentPermissionGuide = false
@@ -1938,6 +2021,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dockBadgeSnapshot = DockBadgeSnapshot.empty
     private var audioActivitySnapshot = AudioActivitySnapshot.empty
     private var allWindows: [AeroWindow] = []
+    private var allWorkspaces: [AeroWorkspace] = []
+    private var allRunningApps: [RunningApp] = []
     private var windowlessApps: [RunningApp] = []
     private var orderedItems: [SwitcherItem] = []
     private var itemRows: [String: ActionRow] = [:]
@@ -1952,8 +2037,26 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var launchDirection = 1
     private var singletonLockFileDescriptor: Int32 = -1
     private var isLoaded = false
+    private var isAwaitingPresentation = false
     private var isRefreshing = false
+    private var isSnapshotLoading = false
     private var loadGeneration = 0
+    private var actionTracker = SwitcherActionTracker()
+    private var reopenTracker = SwitcherReopenTracker()
+    private var reopenRefreshWorkItem: DispatchWorkItem?
+    private var reopenPresentationDeadline: TimeInterval?
+    private var actionRefreshWorkItem: DispatchWorkItem?
+    private var actionFeedback: SwitcherActionFeedback?
+    private var feedbackDismissWorkItem: DispatchWorkItem?
+    private var latestFeedbackActionID: UUID?
+    private var suppressedAutomaticActivationPID: pid_t?
+    private weak var actionFeedbackView: SwitcherActionFeedbackView?
+    private var keepsPanelFrame = false
+    private var watchesActionChanges = false
+    private var documentMinimumHeightConstraint: NSLayoutConstraint?
+    private var requestWindowClose: (Int, @escaping (Error?) -> Void) -> Void = {
+        AeroSpaceClient.close(windowID: $0, completion: $1)
+    }
     private var windowControlPanelController: WindowControlPanelController?
     private let windowControlQueue = DispatchQueue(
         label: "io.github.tovifun.aerospace-companion.window-control",
@@ -1971,19 +2074,44 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
         ensureRuntimeDirectory()
         if !acquireSingletonLock() {
-            DistributedNotificationCenter.default().postNotificationName(
-                cycleNotificationName,
-                object: nil,
-                userInfo: ["direction": launchDirection],
-                deliverImmediately: true
-            )
+            if invokedByShortcut {
+                DistributedNotificationCenter.default().postNotificationName(
+                    cycleNotificationName, object: nil,
+                    userInfo: ["direction": launchDirection], deliverImmediately: true
+                )
+            } else if CommandLine.arguments.contains("--search") {
+                DistributedNotificationCenter.default().postNotificationName(
+                    searchNotificationName, object: nil, deliverImmediately: true
+                )
+            } else if !CommandLine.arguments.contains("--daemon") {
+                DistributedNotificationCenter.default().postNotificationName(
+                    settingsNotificationName, object: nil, deliverImmediately: true
+                )
+            }
             NSApp.terminate(nil)
             return
         }
 
+        prepareSettingsEntryPoints()
+        applicationTerminationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] notification in
+            guard let self,
+                  let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            else { return }
+            let pid = app.processIdentifier
+            guard self.allWindows.contains(where: { $0.appPID == pid })
+                    || self.windowlessApps.contains(where: { $0.processIdentifier == pid })
+                    || self.actionTracker.pending.values.contains(where: { $0.processIdentifier == pid })
+            else { return }
+            self.actionTracker.applicationDidTerminate(pid, now: ProcessInfo.processInfo.systemUptime)
+            if self.panel != nil { self.keepsPanelFrame = true }
+            self.loadWindows(presentErrors: false, preserveSelection: true)
+        }
         startSignalHandling()
         startCommandTabInterception()
         prepareWindowControlPanel()
+        prepareWindowSearch()
         writeDaemonPID()
         cycleObserver = DistributedNotificationCenter.default().addObserver(
             forName: cycleNotificationName,
@@ -1995,14 +2123,21 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let presentedPermissionGuide = presentPermissionGuideIfNeeded()
+        if CommandLine.arguments.contains("--search") {
+            showWindowSearch()
+            return
+        }
         if CommandLine.arguments.contains("--daemon") {
             // AeroSpace may not have created its socket yet during login or installation.
             // Keep the daemon responsive so the first shortcut can retry the load.
             loadWindows(presentErrors: false)
             return
         }
-        if presentedPermissionGuide && !invokedByShortcut {
+        if !invokedByShortcut {
             loadWindows(presentErrors: false)
+            if !presentedPermissionGuide || CommandLine.arguments.contains("--settings") {
+                showSettings()
+            }
             return
         }
         showSwitcher()
@@ -2013,16 +2148,147 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         return false
     }
 
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if windowSearchController?.isVisible == true {
+            showWindowSearch()
+            return true
+        }
+        showSettings()
+        return false
+    }
+
+    private func prepareSettingsEntryPoints() {
+        func settingsItem() -> NSMenuItem {
+            let item = NSMenuItem(
+                title: localized("Settings…", "设置…"), action: #selector(showSettings), keyEquivalent: ","
+            )
+            item.target = self
+            return item
+        }
+        func quitItem() -> NSMenuItem {
+            let item = NSMenuItem(
+                title: localized("Quit AeroSpace Companion", "退出 AeroSpace Companion"),
+                action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"
+            )
+            item.target = NSApp
+            return item
+        }
+
+        let statusMenu = NSMenu(title: "AeroSpace Companion")
+        let heading = NSMenuItem(title: "AeroSpace Companion", action: nil, keyEquivalent: "")
+        heading.isEnabled = false
+        statusMenu.addItem(heading)
+        let searchItem = NSMenuItem(title: localized("Search windows…", "搜索窗口…"),
+                                    action: #selector(showWindowSearch), keyEquivalent: "")
+        searchItem.target = self
+        statusMenu.addItem(searchItem)
+        statusMenu.addItem(settingsItem())
+        statusMenu.addItem(.separator())
+        statusMenu.addItem(quitItem())
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        if let image = NSImage(
+            systemSymbolName: "rectangle.3.group", accessibilityDescription: "AeroSpace Companion"
+        ) {
+            image.isTemplate = true
+            item.button?.image = image
+        } else {
+            item.button?.title = "AC"
+        }
+        item.button?.toolTip = "AeroSpace Companion"
+        item.menu = statusMenu
+        statusItem = item
+
+        let mainMenu = NSMenu()
+        let appItem = NSMenuItem(title: "AeroSpace Companion", action: nil, keyEquivalent: "")
+        let appMenu = NSMenu(title: "AeroSpace Companion")
+        appMenu.addItem(settingsItem())
+        appMenu.addItem(.separator())
+        appMenu.addItem(quitItem())
+        appItem.submenu = appMenu
+        mainMenu.addItem(appItem)
+        // Native field editors resolve Command-A/C/V/X through the responder
+        // chain's Edit menu, including the search field and its input method.
+        let editItem = NSMenuItem(title: localized("Edit", "编辑"), action: nil, keyEquivalent: "")
+        let editMenu = NSMenu(title: editItem.title)
+        for (title, selector, key) in [
+            (localized("Cut", "剪切"), #selector(NSText.cut(_:)), "x"),
+            (localized("Copy", "复制"), #selector(NSText.copy(_:)), "c"),
+            (localized("Paste", "粘贴"), #selector(NSText.paste(_:)), "v"),
+            (localized("Select All", "全选"), #selector(NSText.selectAll(_:)), "a"),
+        ] {
+            editMenu.addItem(NSMenuItem(title: title, action: selector, keyEquivalent: key))
+        }
+        editItem.submenu = editMenu
+        mainMenu.addItem(editItem)
+        let windowItem = NSMenuItem(title: localized("Window", "窗口"), action: nil, keyEquivalent: "")
+        let windowMenu = NSMenu(title: localized("Window", "窗口"))
+        windowMenu.addItem(NSMenuItem(
+            title: localized("Close", "关闭"),
+            action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"
+        ))
+        windowItem.submenu = windowMenu
+        mainMenu.addItem(windowItem)
+        NSApp.mainMenu = mainMenu
+        NSApp.windowsMenu = windowMenu
+
+        settingsObserver = DistributedNotificationCenter.default().addObserver(
+            forName: settingsNotificationName, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.showSettings()
+        }
+    }
+
+    @objc private func showSettings() {
+        windowSearchController?.hide()
+        if panel != nil { hideSwitcher() }
+        windowControlPanelController?.hide(deactivateApplication: false)
+        if settingsController == nil {
+            let controller = SettingsWindowController()
+            controller.onPreferencesChanged = { [weak self] in self?.applyPreferences() }
+            settingsController = controller
+        }
+        settingsController?.show()
+    }
+
+    private func applyPreferences() {
+        let previousKey = selectedItem?.key
+        iconCache.removeAll()
+        selectedIndex = nil
+        hoveredItemKey = nil
+        orderedItems = makeOrderedItems()
+        guard panel?.isVisible == true else { return }
+        refreshContent()
+        if let previousKey, let index = orderedItems.firstIndex(where: { $0.key == previousKey }) {
+            setSelectedIndex(index)
+        } else {
+            prepareInitialSelection()
+        }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
+        actionRefreshWorkItem?.cancel()
+        reopenRefreshWorkItem?.cancel()
+        feedbackDismissWorkItem?.cancel()
         stopEventMonitoring()
         stopCommandTabInterception()
         permissionGuideCompletion?.cancel()
         if let cycleObserver {
             DistributedNotificationCenter.default().removeObserver(cycleObserver)
         }
+        if let settingsObserver {
+            DistributedNotificationCenter.default().removeObserver(settingsObserver)
+        }
+        if let searchObserver {
+            DistributedNotificationCenter.default().removeObserver(searchObserver)
+        }
+        if let applicationTerminationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(applicationTerminationObserver)
+        }
         forwardSignalSource?.cancel()
         reverseSignalSource?.cancel()
         windowControlSignalSource?.cancel()
+        searchSignalSource?.cancel()
+        windowSearchController?.hide()
         windowControlPanelController?.hide(deactivateApplication: false)
         if singletonLockFileDescriptor >= 0 {
             unlink(daemonPIDPath)
@@ -2034,68 +2300,81 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private func loadWindows(
         presentErrors: Bool = true,
         preserveSelection: Bool = false,
-        fallbackSelectionIndex: Int? = nil
+        fallbackSelectionIndex: Int? = nil,
+        refreshActivity: Bool = true
     ) {
         loadGeneration += 1
         let generation = loadGeneration
-        isRefreshing = true
+        isSnapshotLoading = true
+        // Background action reconciliation must not stall Tab or modifier release.
+        isRefreshing = !preserveSelection
+        let reopenedPIDs = reopenTracker.processIdentifiers
+        let preparesCachedSelection = !preserveSelection && isLoaded && isAwaitingPresentation
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
             do {
                 let focusedWindowID = AeroSpaceClient.focusedWindowID()
-                let windows = try AeroSpaceClient.allWindows()
-                let dockBadgeSnapshot = DockBadgeClient.currentSnapshot()
-                let audioActivitySnapshot = AudioActivityClient.currentSnapshot()
+                if preparesCachedSelection {
+                    // Focus is cheap to query. Paint the cached selection before
+                    // presenting, without waiting for the catalog or activity reads.
+                    DispatchQueue.main.async {
+                        guard let self, self.loadGeneration == generation else { return }
+                        if self.prepareCachedSelection(focusedID: focusedWindowID) {
+                            self.presentSwitcherIfNeeded()
+                        }
+                    }
+                }
+                let windows = try AeroSpaceClient.allWindows(validatingReopenedPIDs: reopenedPIDs)
+                // If metadata is unavailable, keep window switching functional.
+                let workspaces = (try? AeroSpaceClient.allWorkspaces()) ?? []
+                let dockBadgeSnapshot = refreshActivity ? DockBadgeClient.currentSnapshot() : nil
+                let audioActivitySnapshot = refreshActivity ? AudioActivityClient.currentSnapshot() : nil
                 DispatchQueue.main.async {
                     guard let self, self.loadGeneration == generation else { return }
-                    let previousSelectionKey = preserveSelection
-                        ? self.selectedItem?.key
-                        : nil
-                    self.focusedWindowID = focusedWindowID
-                    self.dockBadgeSnapshot = dockBadgeSnapshot
-                    self.audioActivitySnapshot = audioActivitySnapshot
-                    self.allWindows = windows
-                    self.windowlessApps = self.runningAppsWithoutWindows(excluding: windows)
-                    self.warmIconCache()
-                    self.selectedIndex = nil
-                    self.orderedItems = self.workspaceGroups()
-                        .flatMap(\.windows)
-                        .map(SwitcherItem.window)
-                        + self.windowlessApps.map(SwitcherItem.application)
-                    self.isLoaded = true
-                    self.isRefreshing = false
-                    self.updateWindowControlPanelIfVisible()
-                    guard !self.orderedItems.isEmpty else {
-                        if presentErrors {
-                            self.showError("No windows or applications are currently available.")
-                        }
-                        return
-                    }
-                    self.refreshContent()
-                    let pendingDirectSelectionIndex = self.pendingDirectSelectionIndex
-                    self.pendingDirectSelectionIndex = nil
-                    if let pendingDirectSelectionIndex,
-                       self.orderedItems.indices.contains(pendingDirectSelectionIndex) {
-                        self.pendingCycleDelta = 0
-                        self.setSelectedIndex(pendingDirectSelectionIndex)
-                    } else if preserveSelection {
-                        let preservedIndex = previousSelectionKey.flatMap { key in
-                            self.orderedItems.firstIndex { $0.key == key }
-                        } ?? fallbackSelectionIndex ?? 0
-                        let pendingDelta = self.pendingCycleDelta
-                        self.pendingCycleDelta = 0
-                        self.setSelectedIndex(preservedIndex + pendingDelta)
-                    } else {
-                        self.prepareInitialSelection()
-                    }
-                    if self.commitWhenLoaded {
-                        self.commitSelectedWindow()
-                    }
+                    let statusChanged = dockBadgeSnapshot.map { self.dockBadgeSnapshot != $0 } == true
+                        || audioActivitySnapshot.map { self.audioActivitySnapshot != $0 } == true
+                    if let dockBadgeSnapshot { self.dockBadgeSnapshot = dockBadgeSnapshot }
+                    if let audioActivitySnapshot { self.audioActivitySnapshot = audioActivitySnapshot }
+                    let applications = NSWorkspace.shared.runningApplications
+                    self.applyWindowSnapshot(
+                        windows: windows, workspaces: workspaces,
+                        apps: self.runningApplicationCatalog(from: applications),
+                        runningPIDs: Set(applications.filter { !$0.isTerminated }.map(\.processIdentifier)),
+                        focusedID: focusedWindowID,
+                        preserveSelection: preserveSelection || (preparesCachedSelection && self.selectedIndex != nil),
+                        fallbackSelectionIndex: fallbackSelectionIndex, forceRefresh: statusChanged
+                    )
+                    self.scheduleActionRefresh()
+                    self.scheduleReopenRefresh()
                 }
             } catch {
                 DispatchQueue.main.async { [weak self] in
                     guard let self, self.loadGeneration == generation else { return }
+                    let wasWaitingForReopen = self.reopenPresentationDeadline != nil
                     self.isRefreshing = false
-                    if presentErrors {
+                    self.isSnapshotLoading = false
+                    let resolutions = self.actionTracker.reconcile(
+                        liveWindowIDs: nil, runningPIDs: self.runningApplicationPIDs,
+                        now: ProcessInfo.processInfo.systemUptime
+                    )
+                    self.presentActionResolutions(resolutions)
+                    if !resolutions.isEmpty {
+                        self.applyWindowSnapshot(
+                            windows: self.allWindows, workspaces: self.allWorkspaces,
+                            apps: self.allRunningApps, runningPIDs: self.runningApplicationPIDs,
+                            focusedID: self.focusedWindowID, preserveSelection: true, forceRefresh: true
+                        )
+                    }
+                    self.scheduleActionRefresh()
+                    self.reopenTracker.reconcile(
+                        windowsByPID: [:], runningPIDs: self.runningApplicationPIDs,
+                        now: ProcessInfo.processInfo.systemUptime
+                    )
+                    self.scheduleReopenRefresh()
+                    if let deadline = self.reopenPresentationDeadline,
+                       ProcessInfo.processInfo.systemUptime >= deadline || !self.reopenTracker.needsRefresh {
+                        self.finishReopenPresentationUsingCache()
+                    }
+                    if presentErrors && !wasWaitingForReopen {
                         self.showError(error.localizedDescription)
                     }
                 }
@@ -2103,22 +2382,154 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private var runningApplicationPIDs: Set<pid_t> {
+        Set(NSWorkspace.shared.runningApplications.filter { !$0.isTerminated }.map(\.processIdentifier))
+    }
+
+    private func applyWindowSnapshot(
+        windows: [AeroWindow], workspaces: [AeroWorkspace], apps: [RunningApp],
+        runningPIDs: Set<pid_t>, focusedID: Int?, preserveSelection: Bool,
+        fallbackSelectionIndex: Int? = nil, forceRefresh: Bool = false
+    ) {
+        let preserveSelection = preserveSelection && isLoaded
+            && (selectedIndex != nil || fallbackSelectionIndex != nil)
+        let previousKey = preserveSelection ? selectedItem?.key : nil
+        let previousAppPID: pid_t?
+        if preserveSelection, case .application(let app) = selectedItem {
+            previousAppPID = app.processIdentifier
+        } else {
+            previousAppPID = nil
+        }
+        let previousIndex = selectedIndex ?? fallbackSelectionIndex ?? 0
+        let resolutions = actionTracker.reconcile(
+            liveWindowIDs: Set(windows.map(\.windowID)), runningPIDs: runningPIDs,
+            now: ProcessInfo.processInfo.systemUptime
+        )
+        var visibleWindows = windows.filter {
+            !actionTracker.suppresses(windowID: $0.windowID, processIdentifier: $0.appPID)
+        }
+        let incomingIDs = Set(visibleWindows.map(\.windowID))
+        // An app can lose its windows before finishing termination. Retain its
+        // existing rows, with progress, until the process actually exits.
+        visibleWindows += allWindows.filter {
+            !incomingIDs.contains($0.windowID)
+                && actionTracker.action(windowID: $0.windowID, processIdentifier: $0.appPID) != nil
+        }
+        if preserveSelection {
+            let previousOrder = Dictionary(uniqueKeysWithValues: allWindows.enumerated().map { ($0.element.windowID, $0.offset) })
+            visibleWindows = visibleWindows.enumerated().sorted {
+                let left = previousOrder[$0.element.windowID] ?? (allWindows.count + $0.offset)
+                let right = previousOrder[$1.element.windowID] ?? (allWindows.count + $1.offset)
+                return left < right
+            }.map(\.element)
+        }
+        let windowPIDs = Set(visibleWindows.map(\.appPID))
+        var visibleApps = apps.filter {
+            !windowPIDs.contains($0.processIdentifier)
+                && !actionTracker.suppresses(processIdentifier: $0.processIdentifier)
+        }
+        let incomingPIDs = Set(visibleApps.map(\.processIdentifier))
+        visibleApps += windowlessApps.filter {
+            !incomingPIDs.contains($0.processIdentifier)
+                && !windowPIDs.contains($0.processIdentifier)
+                && actionTracker.action(processIdentifier: $0.processIdentifier) != nil
+        }
+        if preserveSelection {
+            let previousOrder = Dictionary(uniqueKeysWithValues: windowlessApps.enumerated().map { ($0.element.processIdentifier, $0.offset) })
+            visibleApps = visibleApps.enumerated().sorted {
+                (previousOrder[$0.element.processIdentifier] ?? (windowlessApps.count + $0.offset))
+                    < (previousOrder[$1.element.processIdentifier] ?? (windowlessApps.count + $1.offset))
+            }.map(\.element)
+        }
+        let needsRefresh = !isLoaded || !preserveSelection || forceRefresh || !resolutions.isEmpty
+            || allWindows != visibleWindows || allWorkspaces != workspaces
+            || windowlessApps != visibleApps || focusedWindowID != focusedID
+            || orderedItems.contains { itemRows[$0.key]?.pendingMessage != pendingAction(for: $0).map(pendingStatusText) }
+        allWindows = visibleWindows
+        allWorkspaces = workspaces
+        allRunningApps = apps
+        focusedWindowID = focusedID
+        windowlessApps = visibleApps
+        warmIconCache()
+        reopenTracker.reconcile(
+            windowsByPID: Dictionary(grouping: visibleWindows, by: \.appPID).mapValues { Set($0.map(\.windowID)) },
+            runningPIDs: runningPIDs, now: ProcessInfo.processInfo.systemUptime
+        )
+        isSnapshotLoading = false
+        if let deadline = reopenPresentationDeadline,
+           ProcessInfo.processInfo.systemUptime < deadline, reopenTracker.hasUnresolvedReopen {
+            // Update the cache atomically, but do not paint the old windowless
+            // row while the app is registering the window we just requested.
+            isRefreshing = true
+            return
+        }
+        reopenPresentationDeadline = nil
+        // Publish rebuilt rows and their selected appearance in one transaction.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        selectedIndex = nil
+        orderedItems = makeOrderedItems()
+        isLoaded = true
+        isRefreshing = false
+        isSnapshotLoading = false
+        presentActionResolutions(resolutions)
+        updateWindowControlPanelIfVisible()
+        if needsRefresh {
+            refreshContent(preservingViewport: preserveSelection, preferredViewportKey: previousKey)
+        }
+        guard !orderedItems.isEmpty else {
+            presentSwitcherIfNeeded()
+            if commitWhenLoaded { dismiss() }
+            return
+        }
+        let directIndex = pendingDirectSelectionIndex
+        pendingDirectSelectionIndex = nil
+        if let directIndex, orderedItems.indices.contains(directIndex) {
+            pendingCycleDelta = 0
+            setSelectedIndex(directIndex)
+        } else if preserveSelection {
+            let promotedIndex = previousAppPID.flatMap { pid in
+                orderedItems.firstIndex { item in
+                    guard case .window(let window) = item else { return false }
+                    return window.appPID == pid && window.windowID == focusedID
+                } ?? orderedItems.firstIndex { item in
+                    guard case .window(let window) = item else { return false }
+                    return window.appPID == pid
+                }
+            }
+            let preservedIndex = previousKey.flatMap { key in orderedItems.firstIndex { $0.key == key } }
+                ?? promotedIndex ?? min(previousIndex, orderedItems.count - 1)
+            let delta = pendingCycleDelta
+            pendingCycleDelta = 0
+            setSelectedIndex(preservedIndex + delta, reveal: delta != 0)
+        } else {
+            prepareInitialSelection()
+        }
+        presentSwitcherIfNeeded()
+        if commitWhenLoaded { commitSelectedWindow() }
+    }
+
     private func handleCycleRequest(
         direction: Int,
         tracking modifier: NSEvent.ModifierFlags = .option,
         modifierIsPressed: Bool? = nil
     ) {
+        windowSearchController?.hide()
+        let trackingChanged = trackedReleaseModifier != modifier
         let isPressed = modifierIsPressed ?? NSEvent.modifierFlags.contains(modifier)
         trackedReleaseModifier = isPressed ? modifier : nil
         if isPressed {
             commitWhenLoaded = false
         }
 
-        if panel?.isVisible == true {
+        if panel != nil {
             if isRefreshing {
                 pendingCycleDelta += direction
                 return
             }
+            // The list stays identical; only Command's direct-selection keycaps change.
+            if trackingChanged { refreshContent() }
             moveSelection(by: direction)
             return
         }
@@ -2127,12 +2538,17 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         commitWhenLoaded = !isPressed
         focusedApplicationPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         focusedWindowID = nil
+        // Both shortcuts use the same cached workspace/window/application list.
+        orderedItems = makeOrderedItems()
         let hasCachedItems = !orderedItems.isEmpty
+        let waitsForReopenedWindow = reopenTracker.hasUnresolvedReopen
+        reopenPresentationDeadline = waitsForReopenedWindow
+            ? ProcessInfo.processInfo.systemUptime + SwitcherReopenTracker.presentationWait : nil
         pendingCycleDelta = 0
         selectedIndex = nil
-        isLoaded = hasCachedItems
+        isLoaded = hasCachedItems && !waitsForReopenedWindow
         showSwitcher()
-        loadWindows()
+        loadWindows(refreshActivity: !reopenTracker.needsRefresh)
     }
 
     private func showSwitcher() {
@@ -2151,16 +2567,21 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.hidesOnDeactivate = false
         panel.animationBehavior = .none
         panel.alphaValue = 0
+        panel.acceptsMouseMovedEvents = true
         panel.level = .screenSaver
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.contentView = makeContentView(for: screen)
         self.panel = panel
+        isAwaitingPresentation = true
 
         localEventMonitor = NSEvent.addLocalMonitorForEvents(
             matching: [.keyDown, .flagsChanged]
         ) { [weak self] event in
             if event.type == .flagsChanged {
                 self?.handleModifierFlags(event.modifierFlags)
+            } else if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "," {
+                self?.showSettings()
+                return nil
             } else if self?.handleCommandSelectionShortcut(event) == true {
                 return nil
             } else if event.keyCode == 53 {
@@ -2168,7 +2589,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.dismiss()
                 return nil
             } else if event.keyCode == 36 {
-                self?.commitSelectedWindow()
+                self?.commitSelectedWindow(allowPendingActivation: true)
                 return nil
             }
             return event
@@ -2185,7 +2606,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             .rightMouseDown,
             .otherMouseDown,
         ]
-        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: mouseDownEvents) {
+        localMouseMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: mouseDownEvents.union(.mouseMoved)
+        ) {
             [weak self] event in
             guard
                 let self,
@@ -2193,6 +2616,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                 event.window === panel,
                 let contentView = panel.contentView
             else {
+                return event
+            }
+
+            if event.type == .mouseMoved {
+                self.reconcileHoveredItem(at: event.locationInWindow)
                 return event
             }
 
@@ -2207,18 +2635,22 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             self.dismiss()
             return nil
         }
-        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: mouseDownEvents) {
-            [weak self] _ in
+        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: mouseDownEvents.union(.mouseMoved)) {
+            [weak self] event in
+            let mouseLocation = NSEvent.mouseLocation
             DispatchQueue.main.async {
                 guard
                     let self,
                     let panel = self.panel,
-                    panel.isVisible,
-                    !panel.frame.contains(NSEvent.mouseLocation)
+                    panel.isVisible
                 else {
                     return
                 }
-                self.dismiss()
+                if event.type == .mouseMoved {
+                    self.reconcileHoveredItem(at: panel.convertPoint(fromScreen: mouseLocation))
+                } else if !panel.frame.contains(mouseLocation) {
+                    self.dismiss()
+                }
             }
         }
         localScrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) {
@@ -2233,9 +2665,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                 return event
             }
 
-            // Deliver the wheel event directly. The borderless switcher panel can
-            // otherwise leave it on a child row instead of reaching NSScrollView.
-            scrollView.scrollWheel(with: event)
+            self.scrollSwitcher(with: event, in: scrollView)
             return nil
         }
         globalScrollMonitor = NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel) {
@@ -2257,7 +2687,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                 // the previously active app, so the local monitor above never sees
                 // them. Forward those global events only while the pointer is over
                 // our panel.
-                scrollView.scrollWheel(with: event)
+                self.scrollSwitcher(with: event, in: scrollView)
             }
         }
         localMagnifyMonitor = NSEvent.addLocalMonitorForEvents(matching: .magnify) {
@@ -2295,8 +2725,33 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.scrollSwitcher(byMagnification: event.magnification)
             }
         }
+        // A cached list waits only for its opening selection. Cold/reopen loads
+        // can show the existing progress view while the catalog is unavailable.
+        if !isLoaded { presentSwitcherIfNeeded() }
+    }
+
+    private func prepareCachedSelection(focusedID: Int?) -> Bool {
+        guard panel != nil, isLoaded, selectedIndex == nil else { return false }
+        // Missing focus or a newly focused window needs the fresh catalog. A
+        // cached workspace/app fallback could highlight the wrong item first.
+        guard let focusedID, allWindows.contains(where: { $0.windowID == focusedID }) else { return false }
+        focusedWindowID = focusedID
+        prepareInitialSelection()
+        refreshContent(preservingViewport: false)
+        if let key = selectedItem?.key, let row = itemRows[key] {
+            row.scrollToVisible(row.bounds)
+        }
+        return selectedIndex != nil
+    }
+
+    private func presentSwitcherIfNeeded() {
+        guard isAwaitingPresentation, let panel, !panel.isVisible else { return }
+        isAwaitingPresentation = false
+        panel.contentView?.layoutSubtreeIfNeeded()
+        panel.contentView?.displayIfNeeded()
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
+        reconcileHoveredItemWithPointer()
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.05
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
@@ -2304,33 +2759,51 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func refreshContent() {
+    private func refreshContent(preservingViewport: Bool = true, preferredViewportKey: String? = nil) {
         guard let panel, let targetScreen else { return }
-        panel.setFrame(switcherFrame(for: targetScreen), display: false)
+        let viewport = preservingViewport ? switcherScrollView.flatMap {
+            SwitcherScroll.capture(in: $0, rows: itemRows, preferredKey: preferredViewportKey ?? selectedItem?.key)
+        } : nil
+        if !keepsPanelFrame {
+            panel.setFrame(switcherFrame(for: targetScreen), display: false)
+        }
         panel.contentView = makeContentView(for: targetScreen)
-        panel.makeKeyAndOrderFront(nil)
+        panel.contentView?.layoutSubtreeIfNeeded()
+        if let key = selectedItem?.key { itemRows[key]?.isSelected = true }
+        if let viewport, let scrollView = switcherScrollView {
+            if keepsPanelFrame {
+                // Leave just enough trailing space to avoid a jump when removing
+                // items at the end of a scrolled list. Reset on the next invocation.
+                documentMinimumHeightConstraint?.constant = SwitcherScroll.anchoredY(
+                    viewport, in: scrollView, rows: itemRows
+                ) + scrollView.contentView.bounds.height
+                panel.contentView?.layoutSubtreeIfNeeded()
+            }
+            SwitcherScroll.restore(viewport, in: scrollView, rows: itemRows)
+        }
+        // Refreshing a pending operation must not steal focus from a save dialog.
+        reconcileHoveredItemWithPointer()
+    }
+
+    private func scrollSwitcher(with event: NSEvent, in scrollView: NSScrollView) {
+        reclaimSwitcherKeyboardFocus()
+        // Events intercepted by the session tap do not travel through AppKit's
+        // normal gesture routing. Apply deltas directly instead of asking
+        // NSScrollView to reconstruct a trackpad gesture from forwarded events.
+        // Deltas already respect natural scrolling; do not invert them again.
+        SwitcherScroll.apply(
+            deltaY: event.scrollingDeltaY,
+            precise: event.hasPreciseScrollingDeltas,
+            to: scrollView
+        )
+        reconcileHoveredItemWithPointer()
     }
 
     private func scrollSwitcher(byMagnification magnification: CGFloat) {
-        guard
-            magnification != 0,
-            let scrollView = switcherScrollView,
-            let documentView = scrollView.documentView
-        else {
-            return
-        }
-
-        let clipView = scrollView.contentView
-        let maximumY = max(0, documentView.bounds.height - clipView.bounds.height)
-        let currentOrigin = clipView.bounds.origin
-        let targetY = min(
-            maximumY,
-            max(0, currentOrigin.y - magnification * 800)
-        )
-        guard targetY != currentOrigin.y else { return }
-
-        clipView.scroll(to: NSPoint(x: currentOrigin.x, y: targetY))
-        scrollView.reflectScrolledClipView(clipView)
+        guard let scrollView = switcherScrollView else { return }
+        reclaimSwitcherKeyboardFocus()
+        SwitcherScroll.apply(deltaY: magnification * 800, precise: true, to: scrollView)
+        reconcileHoveredItemWithPointer()
     }
 
     private func makeContentView(for screen: NSScreen) -> NSView {
@@ -2380,6 +2853,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             progress.startAnimation(nil)
             progress.translatesAutoresizingMaskIntoConstraints = false
             groupStack.addArrangedSubview(progress)
+        } else if orderedItems.isEmpty {
+            let message = textLabel(
+                localized("No windows to show", "没有可显示的窗口"),
+                size: 13, color: .secondaryLabelColor
+            )
+            message.alignment = .center
+            message.heightAnchor.constraint(equalToConstant: 56).isActive = true
+            groupStack.addArrangedSubview(message)
         } else {
             for group in groups {
                 let groupView = makeWorkspaceView(group)
@@ -2393,17 +2874,41 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        let naturalBottom = groupStack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor)
+        naturalBottom.priority = .defaultLow
+        let minimumHeight = documentView.heightAnchor.constraint(greaterThanOrEqualToConstant: 0)
+        documentMinimumHeightConstraint = minimumHeight
         NSLayoutConstraint.activate([
             groupStack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor),
             groupStack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor),
             groupStack.topAnchor.constraint(equalTo: documentView.topAnchor),
-            groupStack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor),
+            groupStack.bottomAnchor.constraint(lessThanOrEqualTo: documentView.bottomAnchor),
+            naturalBottom,
+            minimumHeight,
             documentView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
         ])
 
         root.addSubview(surface)
         surface.addSubview(glass)
         surface.addSubview(scrollView)
+        actionFeedbackView = nil
+        let scrollBottom: NSLayoutConstraint
+        if trackedReleaseModifier == .command {
+            let footer = SwitcherActionFeedbackView()
+            surface.addSubview(footer)
+            actionFeedbackView = footer
+            NSLayoutConstraint.activate([
+                footer.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
+                footer.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
+                footer.bottomAnchor.constraint(equalTo: surface.bottomAnchor, constant: -SwitcherStyle.contentPadding),
+            ])
+            scrollBottom = scrollView.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -4)
+            updateActionFeedback()
+        } else {
+            scrollBottom = scrollView.bottomAnchor.constraint(
+                equalTo: surface.bottomAnchor, constant: -SwitcherStyle.contentPadding
+            )
+        }
         NSLayoutConstraint.activate([
             surface.leadingAnchor.constraint(
                 equalTo: root.leadingAnchor,
@@ -2437,10 +2942,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                 equalTo: surface.topAnchor,
                 constant: SwitcherStyle.contentPadding
             ),
-            scrollView.bottomAnchor.constraint(
-                equalTo: surface.bottomAnchor,
-                constant: -SwitcherStyle.contentPadding
-            ),
+            scrollBottom,
         ])
 
         return root
@@ -2448,11 +2950,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func switcherFrame(for screen: NSScreen) -> NSRect {
         let groups = workspaceGroups()
-        let groupCount = groups.count + (windowlessApps.isEmpty ? 0 : 1)
-        let listHeight = CGFloat(groupCount) * SwitcherStyle.groupHeaderHeight
-            + CGFloat(orderedItems.count) * SwitcherStyle.rowHeight
-            + CGFloat(orderedItems.count) * SwitcherStyle.rowSpacing
-            + CGFloat(max(0, groupCount - 1)) * SwitcherStyle.groupSpacing
+        let listHeight = SwitcherStyle.metrics.listHeight(
+            workspaceWindowCounts: groups.map { $0.windows.count },
+            windowlessAppCount: windowlessApps.count
+        )
         let visibleFrame = screen.visibleFrame
         let width = min(588, max(360, visibleFrame.width - 48))
         let maximumHeight = min(
@@ -2460,6 +2961,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             max(176, visibleFrame.height - SwitcherStyle.panelScreenInset * 2)
         )
         let surfaceChromeHeight = SwitcherStyle.contentPadding * 2
+            + (trackedReleaseModifier == .command ? 32 : 0)
         let height = min(
             max(
                 176,
@@ -2479,13 +2981,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func makeWorkspaceView(_ group: WorkspaceGroup) -> NSView {
+        if group.windows.isEmpty {
+            return makeEmptyWorkspaceRow(group)
+        }
+
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .width
         stack.spacing = SwitcherStyle.rowSpacing
         stack.addArrangedSubview(makeGroupHeader(
             title: workspaceHeaderTitle(group.workspace),
-            metadata: workspaceHeaderMetadata(group)
+            metadata: group.monitorID > 0 ? "D\(group.monitorID)" : "D?",
+            titleIcons: makeWorkspaceTitleIcons(group)
         ))
 
         for window in group.windows {
@@ -2494,6 +3001,86 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         return stack
+    }
+
+    private func makeEmptyWorkspaceRow(_ group: WorkspaceGroup) -> NSView {
+        let row = ActionRow()
+        row.translatesAutoresizingMaskIntoConstraints = false
+        let item = SwitcherItem.workspace(group)
+        let shortcutNumber = commandSelectionShortcutNumber(for: item)
+        let description = localized("Enter this workspace", "进入此工作区")
+        var accessibilityLabel = "\(workspaceHeaderTitle(group.workspace)), \(description)"
+        if let shortcutNumber {
+            accessibilityLabel += localized(
+                ", Command-\(shortcutNumber) selects this item",
+                "，Command-\(shortcutNumber) 选择此项"
+            )
+        }
+        row.setAccessibilityLabel(accessibilityLabel)
+        row.toolTip = localized(
+            "Switch to workspace \(group.workspace) without opening an app",
+            "进入工作区 \(group.workspace)，不启动应用"
+        )
+        row.onClick = { [weak self] in self?.select(item) }
+        row.onHoverChanged = { [weak self] point in
+            self?.reconcileHoveredItem(at: point)
+        }
+        let icon = NSView()
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        let glyph = NSImageView(image: NSImage(
+            systemSymbolName: "rectangle.dashed", accessibilityDescription: nil
+        ) ?? NSImage())
+        glyph.translatesAutoresizingMaskIntoConstraints = false
+        glyph.contentTintColor = .tertiaryLabelColor
+        glyph.imageScaling = .scaleProportionallyUpOrDown
+        icon.addSubview(glyph)
+        NSLayoutConstraint.activate([
+            glyph.centerXAnchor.constraint(equalTo: icon.centerXAnchor),
+            glyph.centerYAnchor.constraint(equalTo: icon.centerYAnchor),
+            glyph.widthAnchor.constraint(equalToConstant: 18),
+            glyph.heightAnchor.constraint(equalToConstant: 18),
+        ])
+        let title = textLabel(
+            workspaceHeaderTitle(group.workspace),
+            size: 10,
+            weight: .semibold,
+            color: .secondaryLabelColor
+        )
+        title.lineBreakMode = .byTruncatingTail
+        title.maximumNumberOfLines = 1
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let status = NSStackView()
+        status.translatesAutoresizingMaskIntoConstraints = false
+        status.orientation = .horizontal
+        status.alignment = .centerY
+        status.spacing = 8
+        status.addArrangedSubview(makeWorkspaceTitleIcons(group))
+        status.addArrangedSubview(textLabel(
+            group.monitorID > 0 ? "D\(group.monitorID)" : "D?",
+            size: 9,
+            weight: .medium,
+            color: .tertiaryLabelColor
+        ))
+        status.addArrangedSubview(textLabel(
+            localized("Enter", "进入"),
+            size: 10,
+            weight: .medium,
+            color: .tertiaryLabelColor
+        ))
+        if let shortcutNumber {
+            status.addArrangedSubview(makeShortcutKeycap(shortcutNumber))
+        }
+        status.setContentHuggingPriority(.required, for: .horizontal)
+        status.setContentCompressionResistancePriority(.required, for: .horizontal)
+        layoutRowContent(
+            row: row, icon: icon, title: title,
+            status: status, height: SwitcherStyle.emptyWorkspaceRowHeight
+        )
+        row.registerLabels(primary: title, primaryColor: .secondaryLabelColor)
+        row.isSelected = selectedItem?.key == item.key
+        itemRows[item.key] = row
+        return row
     }
 
     private func makeApplicationGroupView() -> NSView {
@@ -2518,7 +3105,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         return stack
     }
 
-    private func makeGroupHeader(title: String, metadata: String?) -> NSView {
+    private func makeGroupHeader(
+        title: String,
+        metadata: String? = nil,
+        titleIcons: NSView? = nil
+    ) -> NSView {
+        let metrics = SwitcherStyle.metrics
         let header = NSView()
         header.translatesAutoresizingMaskIntoConstraints = false
         let titleLabel = textLabel(
@@ -2534,9 +3126,23 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
         var constraints = [
             header.heightAnchor.constraint(equalToConstant: SwitcherStyle.groupHeaderHeight),
-            titleLabel.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 10),
-            titleLabel.bottomAnchor.constraint(equalTo: header.bottomAnchor, constant: -6),
+            titleLabel.leadingAnchor.constraint(
+                equalTo: header.leadingAnchor, constant: metrics.groupHeaderHorizontalInset
+            ),
+            titleLabel.bottomAnchor.constraint(
+                equalTo: header.bottomAnchor, constant: -metrics.groupHeaderBottomInset
+            ),
         ]
+        var titleTrailingAnchor = titleLabel.trailingAnchor
+        if let titleIcons {
+            header.addSubview(titleIcons)
+            constraints.append(contentsOf: [
+                titleIcons.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 7),
+                titleIcons.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+            ])
+            titleTrailingAnchor = titleIcons.trailingAnchor
+        }
+        var accessory: NSView?
         if let metadata, !metadata.isEmpty {
             let metadataLabel = textLabel(
                 metadata,
@@ -2548,23 +3154,26 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             metadataLabel.maximumNumberOfLines = 1
             metadataLabel.alignment = .right
             metadataLabel.toolTip = metadata
-            header.addSubview(metadataLabel)
+            accessory = metadataLabel
+        }
+        if let accessory {
+            header.addSubview(accessory)
             constraints.append(contentsOf: [
-                titleLabel.trailingAnchor.constraint(
-                    lessThanOrEqualTo: metadataLabel.leadingAnchor,
+                titleTrailingAnchor.constraint(
+                    lessThanOrEqualTo: accessory.leadingAnchor,
                     constant: -10
                 ),
-                metadataLabel.trailingAnchor.constraint(
+                accessory.trailingAnchor.constraint(
                     equalTo: header.trailingAnchor,
-                    constant: -10
+                    constant: -metrics.groupHeaderHorizontalInset
                 ),
-                metadataLabel.bottomAnchor.constraint(equalTo: titleLabel.bottomAnchor),
+                accessory.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
             ])
         } else {
             constraints.append(
-                titleLabel.trailingAnchor.constraint(
+                titleTrailingAnchor.constraint(
                     lessThanOrEqualTo: header.trailingAnchor,
-                    constant: -10
+                    constant: -metrics.groupHeaderHorizontalInset
                 )
             )
         }
@@ -2573,49 +3182,102 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func workspaceHeaderTitle(_ workspace: String) -> String {
-        let role: String?
-        switch workspace {
-        case "1": role = localized("MEDIA & CALLS", "媒体会议")
-        case "2": role = localized("BROWSING & REFERENCE", "浏览资料")
-        case "3": role = localized("TEMPORARY & PREVIEW", "临时预览")
-        case "4": role = localized("CODE & EDITORS", "Codex 与编辑器")
-        case "5": role = localized("TERMINALS & AGENTS", "终端与 Agent")
-        case "6": role = localized("GIT, DATA & API", "Git、数据库与 API")
-        case "7": role = localized("DESIGN & CONTENT", "设计与内容")
-        case "8": role = localized("COMMUNICATION", "沟通")
-        case "9": role = localized("AI & RESEARCH", "AI 研究")
-        case "10": role = localized("EXTRA WORKSPACE", "备用空间")
-        default: role = nil
-        }
+        let role = SwitcherConfiguration.workspaceLabel(workspace)
         return role.map { "\(workspace) · \($0)" }
             ?? localized("WORKSPACE \(workspace)", "WORKSPACE \(workspace)")
     }
 
     private func workspaceHeaderMetadata(_ group: WorkspaceGroup) -> String {
-        let monitorName = group.monitorName
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        var parts = [
-            monitorName.isEmpty
-                ? localized("DISPLAY \(group.monitorID)", "显示器 \(group.monitorID)")
-                : monitorName,
-        ]
-        if group.isFocused {
-            parts.append(localized("CURRENT", "当前"))
-        } else if group.isVisible {
-            parts.append(localized("VISIBLE", "可见"))
+        WorkspaceHeaderMetadata.text(
+            monitorID: group.monitorID,
+            layout: group.layout,
+            isFocused: group.isFocused,
+            isVisible: group.isVisible,
+            usesChinese: (Locale.preferredLanguages.first ?? "en").hasPrefix("zh")
+        )
+    }
+
+    private func makeWorkspaceTitleIcons(_ group: WorkspaceGroup) -> NSView {
+        let metadata = NSStackView()
+        metadata.translatesAutoresizingMaskIntoConstraints = false
+        metadata.orientation = .horizontal
+        metadata.alignment = .centerY
+        metadata.spacing = 7
+        metadata.toolTip = workspaceHeaderMetadata(group)
+        if let symbol = WorkspaceHeaderMetadata.statusSymbol(
+            isFocused: group.isFocused, isVisible: group.isVisible
+        ) {
+            metadata.addArrangedSubview(workspaceMetadataIcon(
+                symbol: symbol,
+                description: group.isFocused
+                    ? localized("Current workspace", "当前工作区")
+                    : localized("Visible workspace", "可见工作区"),
+                size: 6,
+                color: group.isFocused ? .secondaryLabelColor : .tertiaryLabelColor
+            ))
         }
-        let count = group.windows.count
-        parts.append(localized(
-            count == 1 ? "1 WINDOW" : "\(count) WINDOWS",
-            "\(count) 个"
+        metadata.addArrangedSubview(workspaceMetadataIcon(
+            symbol: WorkspaceHeaderMetadata.layoutSymbol(group.layout),
+            description: WorkspaceHeaderMetadata.layoutLabel(
+                group.layout,
+                usesChinese: (Locale.preferredLanguages.first ?? "en").hasPrefix("zh")
+            ),
+            size: 14,
+            rotation: WorkspaceHeaderMetadata.layoutRotation(group.layout),
+            color: .tertiaryLabelColor
         ))
-        return parts.joined(separator: " · ")
+        metadata.setContentHuggingPriority(.required, for: .horizontal)
+        metadata.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return metadata
+    }
+
+    private func workspaceMetadataIcon(
+        symbol: String,
+        description: String,
+        size: CGFloat,
+        rotation: CGFloat = 0,
+        color: NSColor
+    ) -> NSView {
+        let icon = NSImageView()
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        let source = NSImage(systemSymbolName: symbol, accessibilityDescription: description)
+        if rotation != 0, let source {
+            let rotated = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+                NSGraphicsContext.saveGraphicsState()
+                defer { NSGraphicsContext.restoreGraphicsState() }
+                let transform = NSAffineTransform()
+                transform.translateX(by: rect.midX, yBy: rect.midY)
+                transform.rotate(byDegrees: rotation)
+                transform.concat()
+                source.draw(in: NSRect(x: -size / 2, y: -size / 2, width: size, height: size))
+                return true
+            }
+            rotated.isTemplate = true
+            icon.image = rotated
+        } else {
+            icon.image = source
+        }
+        icon.contentTintColor = color
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        icon.toolTip = description
+        icon.setAccessibilityElement(true)
+        icon.setAccessibilityRole(.image)
+        icon.setAccessibilityLabel(description)
+        NSLayoutConstraint.activate([
+            icon.widthAnchor.constraint(equalToConstant: size),
+            icon.heightAnchor.constraint(equalToConstant: size),
+        ])
+        return icon
     }
 
     private func makeWindowRow(_ window: AeroWindow) -> NSView {
         let row = ActionRow()
         row.translatesAutoresizingMaskIntoConstraints = false
-        let fallbackTitle = window.windowTitle.isEmpty ? "Untitled Window" : window.windowTitle
+        let fallbackTitle = WindowDisplayTitle.resolve(
+            windowTitle: window.windowTitle,
+            appName: window.appName,
+            fallback: localized("Untitled Window", "无标题窗口")
+        )
         let item = SwitcherItem.window(window)
         let shortcutNumber = commandSelectionShortcutNumber(for: item)
         let isCurrentWindow = window.windowID == focusedWindowID
@@ -2629,8 +3291,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             shortcutNumber: shortcutNumber
         ))
         row.onClick = { [weak self] in self?.select(item) }
-        row.onHoverChanged = { [weak self] isHovered in
-            self?.updateHoveredItem(item.key, isHovered: isHovered)
+        row.onHoverChanged = { [weak self] point in
+            self?.reconcileHoveredItem(at: point)
         }
 
         let icon = appIconView(image: appIcon(bundleID: window.appBundleID))
@@ -2645,16 +3307,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let windowTitle = textLabel(
             fallbackTitle,
-            size: 15,
+            size: SwitcherStyle.metrics.rowTitleFontSize,
             weight: .medium,
             color: .labelColor
         )
-        windowTitle.lineBreakMode = .byTruncatingTail
+        windowTitle.lineBreakMode = .byTruncatingMiddle
         windowTitle.maximumNumberOfLines = 1
         windowTitle.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         layoutRowContent(row: row, icon: icon, title: windowTitle, status: status)
         row.registerLabels(primary: windowTitle)
+        row.pendingMessage = pendingAction(for: item).map(pendingStatusText)
+        row.isSelected = selectedItem?.key == item.key
         itemRows[item.key] = row
         return row
     }
@@ -2675,8 +3339,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             shortcutNumber: shortcutNumber
         ))
         row.onClick = { [weak self] in self?.select(item) }
-        row.onHoverChanged = { [weak self] isHovered in
-            self?.updateHoveredItem(item.key, isHovered: isHovered)
+        row.onHoverChanged = { [weak self] point in
+            self?.reconcileHoveredItem(at: point)
         }
 
         let icon = appIconView(image: appIcon(for: app))
@@ -2691,16 +3355,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let appName = textLabel(
             app.appName,
-            size: 15,
+            size: SwitcherStyle.metrics.rowTitleFontSize,
             weight: .medium,
             color: .labelColor
         )
-        appName.lineBreakMode = .byTruncatingTail
+        appName.lineBreakMode = .byTruncatingMiddle
         appName.maximumNumberOfLines = 1
         appName.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         layoutRowContent(row: row, icon: icon, title: appName, status: status)
         row.registerLabels(primary: appName)
+        row.pendingMessage = pendingAction(for: item).map(pendingStatusText)
+        row.isSelected = selectedItem?.key == item.key
         itemRows[item.key] = row
         return row
     }
@@ -2772,21 +3438,23 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func workspaceGroups() -> [WorkspaceGroup] {
         let grouped = Dictionary(grouping: allWindows, by: \.workspace)
-        let names = grouped.keys.sorted { left, right in
-            if let leftNumber = Int(left), let rightNumber = Int(right) {
-                return leftNumber < rightNumber
-            }
-            if Int(left) != nil {
-                return true
-            }
-            if Int(right) != nil {
-                return false
-            }
-            return left.localizedStandardCompare(right) == .orderedAscending
-        }
+        let names = WorkspaceCatalog.orderedNames(
+            occupied: Array(grouped.keys), workspaces: allWorkspaces,
+            showEmptyWorkspaces: SwitcherPreferences.shared.showEmptyWorkspaces
+        )
         return names.compactMap { workspace in
+            let windows = grouped[workspace] ?? []
+            if windows.isEmpty {
+                guard let info = allWorkspaces.first(where: { $0.workspace == workspace }) else {
+                    return nil
+                }
+                return WorkspaceGroup(
+                    workspace: workspace, isFocused: info.isFocused, isVisible: info.isVisible,
+                    monitorID: info.monitorID, monitorName: info.monitorName,
+                    layout: info.layout, windows: []
+                )
+            }
             guard
-                let windows = grouped[workspace],
                 let firstWindow = windows.first
             else {
                 return nil
@@ -2797,9 +3465,16 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                 isVisible: windows.contains(where: \.workspaceIsVisible),
                 monitorID: firstWindow.monitorID,
                 monitorName: firstWindow.monitorName,
+                layout: firstWindow.workspaceLayout,
                 windows: windows
             )
         }
+    }
+
+    private func makeOrderedItems() -> [SwitcherItem] {
+        workspaceGroups().flatMap { group -> [SwitcherItem] in
+            group.windows.isEmpty ? [.workspace(group)] : group.windows.map(SwitcherItem.window)
+        } + windowlessApps.map(SwitcherItem.application)
     }
 
     private func prepareInitialSelection() {
@@ -2812,10 +3487,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                return window.windowID == focusedWindowID
            }) {
             initialIndex = currentIndex + pendingCycleDelta
+        } else if let emptyIndex = orderedItems.firstIndex(where: {
+            guard case .workspace(let group) = $0 else { return false }
+            return group.isFocused
+        }) {
+            initialIndex = emptyIndex + pendingCycleDelta
         } else if let focusedApplicationPID,
                   let currentIndex = orderedItems.firstIndex(where: {
-                      guard case .application(let app) = $0 else { return false }
-                      return app.processIdentifier == focusedApplicationPID
+                      switch $0 {
+                      case .window(let window): return window.appPID == focusedApplicationPID
+                      case .application(let app): return app.processIdentifier == focusedApplicationPID
+                      case .workspace: return false
+                      }
                   }) {
             initialIndex = currentIndex + pendingCycleDelta
         } else {
@@ -2827,6 +3510,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func moveSelection(by direction: Int) {
+        suppressedAutomaticActivationPID = nil
         guard !orderedItems.isEmpty else {
             pendingCycleDelta += direction
             return
@@ -2839,22 +3523,21 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func setSelectedIndex(_ index: Int) {
+    private func setSelectedIndex(_ index: Int, reveal: Bool = true) {
         guard !orderedItems.isEmpty else { return }
-
-        if let selectedIndex {
-            let previousItem = orderedItems[selectedIndex]
-            itemRows[previousItem.key]?.isSelected = false
-        }
 
         let count = orderedItems.count
         let normalizedIndex = ((index % count) + count) % count
         selectedIndex = normalizedIndex
         let selectedItem = orderedItems[normalizedIndex]
-        if let row = itemRows[selectedItem.key] {
-            row.isSelected = true
-            row.scrollToVisible(row.bounds)
+        for (key, row) in itemRows {
+            row.isSelected = key == selectedItem.key
         }
+        if let row = itemRows[selectedItem.key] {
+            if reveal { row.scrollToVisible(row.bounds) }
+        }
+        updateActionFeedback()
+        reconcileHoveredItemWithPointer()
     }
 
     private func handleModifierFlags(_ flags: NSEvent.ModifierFlags) {
@@ -2866,14 +3549,20 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         self.trackedReleaseModifier = nil
 
-        if isRefreshing || orderedItems.isEmpty {
+        if isRefreshing {
             commitWhenLoaded = true
+        } else if orderedItems.isEmpty {
+            dismiss()
         } else {
             commitSelectedWindow()
         }
     }
 
-    private func commitSelectedWindow() {
+    private func commitSelectedWindow(allowPendingActivation: Bool = false) {
+        if !isRefreshing && orderedItems.isEmpty {
+            dismiss()
+            return
+        }
         guard
             let selectedIndex,
             orderedItems.indices.contains(selectedIndex)
@@ -2881,7 +3570,21 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             commitWhenLoaded = true
             return
         }
-        select(orderedItems[selectedIndex])
+        let item = orderedItems[selectedIndex]
+        if !allowPendingActivation {
+            if pendingAction(for: item) != nil {
+                dismiss()
+                return
+            }
+            if case .application(let app) = item,
+               app.processIdentifier == suppressedAutomaticActivationPID {
+                // Closing the last window must not immediately reopen it when
+                // Command is released. Explicit navigation/click/Return can reopen.
+                dismiss()
+                return
+            }
+        }
+        select(item)
     }
 
     private var selectedItem: SwitcherItem? {
@@ -2894,12 +3597,26 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         return orderedItems[selectedIndex]
     }
 
-    private func updateHoveredItem(_ key: String, isHovered: Bool) {
-        if isHovered {
-            hoveredItemKey = key
-        } else if hoveredItemKey == key {
-            hoveredItemKey = nil
+    private func reconcileHoveredItemWithPointer() {
+        guard let panel else { return }
+        reconcileHoveredItem(at: panel.convertPoint(fromScreen: NSEvent.mouseLocation))
+    }
+
+    private func reconcileHoveredItem(at windowPoint: NSPoint) {
+        guard let scrollView = switcherScrollView else { return }
+        // A row can move under the pointer without receiving mouseExited.
+        let clipView = scrollView.contentView
+        let clipPoint = clipView.convert(windowPoint, from: nil)
+        let hoveredKey = clipView.bounds.contains(clipPoint)
+            ? itemRows.first { _, row in
+                row.bounds.contains(row.convert(windowPoint, from: nil))
+            }?.key
+            : nil
+
+        for (key, row) in itemRows {
+            row.setHovered(key == hoveredKey)
         }
+        hoveredItemKey = hoveredKey
     }
 
     private var commandActionTarget: (index: Int, item: SwitcherItem)? {
@@ -2920,7 +3637,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         return (selectedIndex, orderedItems[selectedIndex])
     }
 
-    private func handleCommandSelectionShortcut(_ event: NSEvent) -> Bool {
+    private func handleCommandSelectionShortcut(_ event: NSEvent, pointerLocation: NSPoint? = nil) -> Bool {
         guard
             event.type == .keyDown,
             trackedReleaseModifier == .command,
@@ -2933,11 +3650,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         switch Int(event.keyCode) {
         case kVK_ANSI_W:
             if !event.isARepeat {
+                reconcileCommandPointer(pointerLocation)
                 closeSelectedWindow()
             }
             return true
         case kVK_ANSI_Q:
             if !event.isARepeat {
+                reconcileCommandPointer(pointerLocation)
                 quitSelectedApplication()
             }
             return true
@@ -2952,14 +3671,31 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             if isRefreshing {
                 pendingDirectSelectionIndex = index
             } else if orderedItems.indices.contains(index) {
+                suppressedAutomaticActivationPID = nil
                 setSelectedIndex(index)
             } else {
-                NSSound.beep()
+                showActionFeedback(localized(
+                    "There is no item \(index + 1) in this list",
+                    "列表中没有第 \(index + 1) 项"
+                ), tone: .neutral)
             }
             return true
         default:
             return false
         }
+    }
+
+    private func reconcileCommandPointer(_ screenPoint: NSPoint?) {
+        guard let panel else { return }
+        // Tracking-area notifications can lag behind a rebuilt list or be sent
+        // to another app after AeroSpace focuses a surviving window.
+        reconcileHoveredItem(at: panel.convertPoint(fromScreen: screenPoint ?? NSEvent.mouseLocation))
+    }
+
+    private func reclaimSwitcherKeyboardFocus() {
+        guard let panel, panel.isVisible, !panel.isKeyWindow || !NSApp.isActive else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        panel.makeKeyAndOrderFront(nil)
     }
 
     private func commandSelectionIndex(for keyCode: Int) -> Int? {
@@ -2977,109 +3713,225 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func closeSelectedWindow() {
-        guard
-            let target = commandActionTarget,
-            case .window(let window) = target.item
-        else {
-            NSSound.beep()
-            return
-        }
-        let preferredSelectionKey = selectedItem?.key
-        let fallbackSelectionIndex = selectedIndex ?? target.index
-
-        allWindows.removeAll { $0.windowID == window.windowID }
-        rebuildItemsAfterSelectionAction(
-            removingApplicationPID: nil,
-            preferredSelectionKey: preferredSelectionKey,
-            fallbackSelectionIndex: fallbackSelectionIndex
-        )
-        AeroSpaceClient.close(windowID: window.windowID) { [weak self] error in
-            guard let self else { return }
-            if let error {
-                self.showTransientActionError(error.localizedDescription)
-            }
-            self.loadWindows(
-                presentErrors: false,
-                preserveSelection: true,
-                fallbackSelectionIndex: fallbackSelectionIndex
-            )
+    private func pendingAction(for item: SwitcherItem) -> PendingSwitcherAction? {
+        switch item {
+        case .window(let window):
+            return actionTracker.action(windowID: window.windowID, processIdentifier: window.appPID)
+        case .application(let app):
+            return actionTracker.action(processIdentifier: app.processIdentifier)
+        case .workspace: return nil
         }
     }
 
-    private func quitSelectedApplication() {
-        guard let target = commandActionTarget else {
+    private func pendingStatusText(_ action: PendingSwitcherAction) -> String {
+        if ProcessInfo.processInfo.systemUptime - action.startedAt >= SwitcherActionTracker.waitingDelay {
+            return localized("Waiting…", "等待响应…")
+        }
+        return action.isQuit ? localized("Quitting…", "退出中…") : localized("Closing…", "关闭中…")
+    }
+
+    private func closeSelectedWindow(target: (index: Int, item: SwitcherItem)? = nil) {
+        guard let target = target ?? commandActionTarget else {
+            showActionFeedback(localized("No window selected", "没有选中的窗口"), tone: .neutral)
             return
         }
-        let preferredSelectionKey = selectedItem?.key
-        let fallbackSelectionIndex = selectedIndex ?? target.index
+        guard case .window(let window) = target.item else {
+            let message: String
+            if case .application(let app) = target.item {
+                message = localized(
+                    "\(app.appName) has no windows to close · ⌘Q quits the app",
+                    "\(app.appName) 没有可关闭的窗口 · ⌘Q 可退出 App"
+                )
+            } else {
+                message = localized("This workspace has no windows to close", "此工作区没有可关闭的窗口")
+            }
+            showActionFeedback(message, tone: .neutral)
+            return
+        }
+        if let pending = pendingAction(for: target.item) {
+            showPendingFeedback(pending)
+            return
+        }
+        let subject = WindowDisplayTitle.resolve(
+            windowTitle: window.windowTitle, appName: window.appName,
+            fallback: localized("Window", "窗口")
+        )
+        guard let action = actionTracker.begin(
+            target: .window(window.windowID), processIdentifier: window.appPID,
+            subject: subject, now: ProcessInfo.processInfo.systemUptime
+        ) else { return }
+        beginActionFeedback(action)
+        requestWindowClose(window.windowID) { [weak self] error in
+            guard let self else { return }
+            if let error, self.actionTracker.cancel(action) {
+                if self.latestFeedbackActionID == action.id {
+                    self.showActionFeedback(localized(
+                        "Couldn’t close \(subject): \(error.localizedDescription)",
+                        "无法关闭 \(subject)：\(error.localizedDescription)"
+                    ), tone: .warning)
+                }
+                self.refreshContent()
+            }
+            self.scheduleActionRefresh()
+        }
+    }
 
+    private func quitSelectedApplication(target: (index: Int, item: SwitcherItem)? = nil) {
+        guard let target = target ?? commandActionTarget else {
+            showActionFeedback(localized("No app selected", "没有选中的 App"), tone: .neutral)
+            return
+        }
         let processIdentifier: pid_t
+        let appName: String
         switch target.item {
         case .window(let window):
             processIdentifier = window.appPID
+            appName = window.appName
         case .application(let app):
             processIdentifier = app.processIdentifier
-        }
-        guard
-            processIdentifier != ProcessInfo.processInfo.processIdentifier,
-            let runningApplication = NSRunningApplication(
-                processIdentifier: processIdentifier
-            )
-        else {
-            NSSound.beep()
+            appName = app.appName
+        case .workspace:
+            showActionFeedback(localized("This workspace has no app to quit", "此工作区没有可退出的 App"), tone: .neutral)
             return
         }
-
+        if let pending = actionTracker.pending[.application(processIdentifier)] {
+            showPendingFeedback(pending)
+            return
+        }
+        guard processIdentifier != ProcessInfo.processInfo.processIdentifier,
+              let runningApplication = NSRunningApplication(processIdentifier: processIdentifier),
+              !runningApplication.isTerminated else {
+            showActionFeedback(localized("This app is no longer running", "此 App 已不在运行"), tone: .neutral)
+            loadWindows(presentErrors: false, preserveSelection: true)
+            return
+        }
+        guard let action = actionTracker.begin(
+            target: .application(processIdentifier), processIdentifier: processIdentifier,
+            subject: appName, now: ProcessInfo.processInfo.systemUptime
+        ) else { return }
+        beginActionFeedback(action)
         guard runningApplication.terminate() else {
-            NSSound.beep()
+            actionTracker.cancel(action)
+            showActionFeedback(localized("Couldn’t quit \(appName)", "无法退出 \(appName)"), tone: .warning)
+            refreshContent()
             return
         }
-        allWindows.removeAll { $0.appPID == processIdentifier }
-        rebuildItemsAfterSelectionAction(
-            removingApplicationPID: processIdentifier,
-            preferredSelectionKey: preferredSelectionKey,
-            fallbackSelectionIndex: fallbackSelectionIndex
-        )
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
-            self?.loadWindows(
-                presentErrors: false,
-                preserveSelection: true,
-                fallbackSelectionIndex: fallbackSelectionIndex
-            )
+        scheduleActionRefresh()
+    }
+
+    private func beginActionFeedback(_ action: PendingSwitcherAction) {
+        // Discard any snapshot started before this command, and keep the panel's
+        // screen position and height for the rest of this invocation.
+        loadGeneration += 1
+        isRefreshing = false
+        isSnapshotLoading = false
+        keepsPanelFrame = true
+        watchesActionChanges = true
+        latestFeedbackActionID = action.id
+        suppressedAutomaticActivationPID = action.processIdentifier
+        showPendingFeedback(action)
+        refreshContent()
+        scheduleActionRefresh()
+    }
+
+    private func scheduleActionRefresh() {
+        actionRefreshWorkItem?.cancel()
+        guard !actionTracker.pending.isEmpty || (watchesActionChanges && panel != nil) else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            if self.isSnapshotLoading {
+                self.scheduleActionRefresh()
+                return
+            }
+            self.loadWindows(presentErrors: false, preserveSelection: true)
+        }
+        actionRefreshWorkItem = work
+        let delay: TimeInterval = actionTracker.pending.isEmpty ? 1 : 0.4
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func presentActionResolutions(_ resolutions: [SwitcherActionResolution]) {
+        if resolutions.contains(where: \.completed) {
+            // A confirmed close/quit may make AeroSpace focus a different app.
+            // Restore input for continued interaction, but leave pending save
+            // dialogs alone until the user explicitly scrolls or chooses a row.
+            reclaimSwitcherKeyboardFocus()
+        }
+        for resolution in resolutions where resolution.action.id == latestFeedbackActionID {
+            let action = resolution.action
+            if resolution.completed {
+                showActionFeedback(action.isQuit
+                    ? localized("Quit \(action.subject)", "已退出 \(action.subject)")
+                    : localized("Closed \(action.subject)", "已关闭 \(action.subject)"), tone: .success)
+            } else {
+                showActionFeedback(localized(
+                    "\(action.subject) hasn’t finished · Switch to the app to check for a dialog",
+                    "\(action.subject) 尚未完成操作 · 请切换到 App 检查确认对话框"
+                ), tone: .warning)
+            }
+        }
+        if let action = actionTracker.pending.values.first(where: { $0.id == latestFeedbackActionID }),
+           ProcessInfo.processInfo.systemUptime - action.startedAt >= SwitcherActionTracker.waitingDelay {
+            showPendingFeedback(action)
         }
     }
 
-    private func rebuildItemsAfterSelectionAction(
-        removingApplicationPID: pid_t?,
-        preferredSelectionKey: String?,
-        fallbackSelectionIndex: Int
-    ) {
-        windowlessApps = runningAppsWithoutWindows(excluding: allWindows).filter {
-            $0.processIdentifier != removingApplicationPID
-        }
-        orderedItems = workspaceGroups()
-            .flatMap(\.windows)
-            .map(SwitcherItem.window)
-            + windowlessApps.map(SwitcherItem.application)
+    private func showPendingFeedback(_ action: PendingSwitcherAction) {
+        latestFeedbackActionID = action.id
+        let waiting = ProcessInfo.processInfo.systemUptime - action.startedAt >= SwitcherActionTracker.waitingDelay
+        let message = waiting ? localized(
+            "Waiting for \(action.subject) · Select it to check for a dialog",
+            "等待 \(action.subject) 响应 · 选择此项可检查确认对话框"
+        ) : (action.isQuit
+            ? localized("Quitting \(action.subject)…", "正在退出 \(action.subject)…")
+            : localized("Closing \(action.subject)…", "正在关闭 \(action.subject)…"))
+        showActionFeedback(message, tone: .progress, expires: false)
+    }
 
-        guard !orderedItems.isEmpty else {
-            dismiss()
-            return
+    private func showActionFeedback(_ message: String, tone: SwitcherFeedbackTone, expires: Bool = true) {
+        guard panel != nil else { return }
+        if tone != .progress { latestFeedbackActionID = nil }
+        let changed = actionFeedback?.message != message
+        actionFeedback = SwitcherActionFeedback(message: message, tone: tone)
+        feedbackDismissWorkItem?.cancel()
+        updateActionFeedback()
+        if changed, let view = actionFeedbackView {
+            NSAccessibility.post(element: view, notification: .announcementRequested, userInfo: [
+                .announcement: message,
+                .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+            ])
         }
-        refreshContent()
-        let nextSelectionIndex = preferredSelectionKey.flatMap { key in
-            orderedItems.firstIndex { $0.key == key }
-        } ?? min(fallbackSelectionIndex, orderedItems.count - 1)
-        setSelectedIndex(nextSelectionIndex)
+        if expires {
+            let work = DispatchWorkItem { [weak self] in
+                self?.actionFeedback = nil
+                self?.updateActionFeedback()
+            }
+            feedbackDismissWorkItem = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: work)
+        }
+    }
+
+    private func updateActionFeedback() {
+        let feedback = actionFeedback ?? SwitcherActionFeedback(
+            message: localized("⌘W Close window    ⌘Q Quit app", "⌘W 关闭窗口    ⌘Q 退出 App"),
+            tone: .neutral
+        )
+        actionFeedbackView?.update(feedback)
     }
 
     private func showTransientActionError(_ message: String) {
+        showActionFeedback(message, tone: .warning)
         NSSound.beep()
         NSLog("AeroSpace Window Switcher action failed: %@", message)
     }
 
     private func select(_ item: SwitcherItem) {
+        if let action = pendingAction(for: item) {
+            hideSwitcher()
+            // A pending quit must never send a reopen event and create a new window.
+            NSRunningApplication(processIdentifier: action.processIdentifier)?.activate(options: [])
+            return
+        }
         switch item {
         case .window(let window):
             let focusedWorkspace = focusedWindowID.flatMap { focusedID in
@@ -3095,6 +3947,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         case .application(let app):
             hideSwitcher()
             reopenApplication(app)
+        case .workspace(let group):
+            hideSwitcher()
+            AeroSpaceClient.activateWorkspace(group.workspace) { [weak self] error in
+                if let error { self?.showTransientActionError(error.localizedDescription) }
+            }
         }
     }
 
@@ -3104,6 +3961,15 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         ) else {
             return
         }
+
+        if reopenTracker.contains(app.processIdentifier) {
+            // A fast second invocation activates the app without sending a
+            // duplicate reopen event while its first window is being created.
+            runningApplication.activate(options: [])
+            scheduleReopenRefresh()
+            return
+        }
+        beginReopeningApplication(app.processIdentifier)
 
         runningApplication.activate(options: [])
         let target = NSAppleEventDescriptor(
@@ -3147,12 +4013,53 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func beginReopeningApplication(_ processIdentifier: pid_t) {
+        actionTracker.prepareForReopen(processIdentifier)
+        reopenTracker.begin(processIdentifier, now: ProcessInfo.processInfo.systemUptime)
+        // A snapshot started before the reopen request must not overwrite the
+        // warmed catalog, even if its slower status queries finish later.
+        loadGeneration += 1
+        isSnapshotLoading = false
+        isRefreshing = false
+        scheduleReopenRefresh()
+    }
+
+    private func finishReopenPresentationUsingCache() {
+        reopenPresentationDeadline = nil
+        applyWindowSnapshot(
+            windows: allWindows, workspaces: allWorkspaces, apps: allRunningApps,
+            runningPIDs: runningApplicationPIDs, focusedID: focusedWindowID,
+            preserveSelection: false, forceRefresh: true
+        )
+        showActionFeedback(localized("Window list update is delayed", "窗口列表更新稍有延迟"), tone: .neutral)
+    }
+
+    private func scheduleReopenRefresh() {
+        reopenRefreshWorkItem?.cancel()
+        guard reopenTracker.needsRefresh else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            if self.isSnapshotLoading {
+                self.scheduleReopenRefresh()
+                return
+            }
+            self.loadWindows(
+                presentErrors: false, preserveSelection: self.panel == nil || self.isLoaded,
+                refreshActivity: false
+            )
+        }
+        reopenRefreshWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
+    }
+
     private func dismiss() {
         hideSwitcher()
         NSApp.deactivate()
     }
 
     private func hideSwitcher() {
+        isAwaitingPresentation = false
+        reopenPresentationDeadline = nil
         trackedReleaseModifier = nil
         commitWhenLoaded = false
         pendingCycleDelta = 0
@@ -3160,13 +4067,23 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         selectedIndex = nil
         hoveredItemKey = nil
         isRefreshing = false
+        isSnapshotLoading = false
         loadGeneration += 1
+        keepsPanelFrame = false
+        watchesActionChanges = false
+        actionFeedback = nil
+        latestFeedbackActionID = nil
+        suppressedAutomaticActivationPID = nil
+        feedbackDismissWorkItem?.cancel()
+        actionFeedbackView = nil
         panel?.orderOut(nil)
         panel = nil
         targetScreen = nil
         switcherScrollView = nil
         itemRows.removeAll()
         stopEventMonitoring()
+        scheduleActionRefresh()
+        scheduleReopenRefresh()
     }
 
     private func stopEventMonitoring() {
@@ -3234,18 +4151,24 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         row: ActionRow,
         icon: NSView,
         title: NSTextField,
-        status: NSView?
+        status: NSView?,
+        height: CGFloat = SwitcherStyle.rowHeight
     ) {
+        let metrics = SwitcherStyle.metrics
         row.addSubview(icon)
         row.addSubview(title)
 
         var constraints = [
-            row.heightAnchor.constraint(equalToConstant: SwitcherStyle.rowHeight),
-            icon.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 9),
+            row.heightAnchor.constraint(equalToConstant: height),
+            icon.leadingAnchor.constraint(
+                equalTo: row.leadingAnchor, constant: metrics.rowLeadingInset
+            ),
             icon.centerYAnchor.constraint(equalTo: row.centerYAnchor),
             icon.widthAnchor.constraint(equalToConstant: SwitcherStyle.iconSize),
             icon.heightAnchor.constraint(equalToConstant: SwitcherStyle.iconSize),
-            title.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 10),
+            title.leadingAnchor.constraint(
+                equalTo: icon.trailingAnchor, constant: metrics.rowContentSpacing
+            ),
             title.centerYAnchor.constraint(equalTo: row.centerYAnchor),
         ]
         if let status {
@@ -3253,14 +4176,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             constraints.append(contentsOf: [
                 title.trailingAnchor.constraint(
                     lessThanOrEqualTo: status.leadingAnchor,
-                    constant: -10
+                    constant: -metrics.rowContentSpacing
                 ),
-                status.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -11),
+                status.trailingAnchor.constraint(
+                    equalTo: row.trailingAnchor, constant: -metrics.rowTrailingInset
+                ),
                 status.centerYAnchor.constraint(equalTo: row.centerYAnchor),
             ])
         } else {
             constraints.append(
-                title.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12)
+                title.trailingAnchor.constraint(
+                    equalTo: row.trailingAnchor, constant: -metrics.rowTextTrailingInset
+                )
             )
         }
         NSLayoutConstraint.activate(constraints)
@@ -3292,6 +4219,27 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         isCurrent: Bool,
         commandShortcutNumber: Int?
     ) -> NSView? {
+        if let action = actionTracker.action(windowID: window?.windowID, processIdentifier: processIdentifier) {
+            let status = NSStackView()
+            status.translatesAutoresizingMaskIntoConstraints = false
+            status.orientation = .horizontal
+            status.alignment = .centerY
+            status.spacing = 6
+            let progress = NSProgressIndicator()
+            progress.style = .spinning
+            progress.controlSize = .small
+            progress.translatesAutoresizingMaskIntoConstraints = false
+            progress.widthAnchor.constraint(equalToConstant: 12).isActive = true
+            progress.heightAnchor.constraint(equalToConstant: 12).isActive = true
+            progress.startAnimation(nil)
+            status.addArrangedSubview(progress)
+            status.addArrangedSubview(textLabel(pendingStatusText(action), size: 10, weight: .medium, color: .secondaryLabelColor))
+            if let commandShortcutNumber { status.addArrangedSubview(makeShortcutKeycap(commandShortcutNumber)) }
+            status.setContentHuggingPriority(.required, for: .horizontal)
+            status.setContentCompressionResistancePriority(.required, for: .horizontal)
+            status.toolTip = localized("Select to check the app for a confirmation dialog", "选择此项可查看 App 的确认对话框")
+            return status
+        }
         let badgeStatus = dockBadgeSnapshot.status(
             bundleIdentifier: bundleIdentifier,
             appName: appName
@@ -3526,46 +4474,25 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func runningAppsWithoutWindows(excluding windows: [AeroWindow]) -> [RunningApp] {
+    private func runningApplicationCatalog(from applications: [NSRunningApplication]) -> [RunningApp] {
         let ownProcessIdentifier = ProcessInfo.processInfo.processIdentifier
-        let windowBundleIdentifiers = Set(
-            windows.map(\.appBundleID).filter { !$0.isEmpty }
-        )
-        let windowAppNames = Set(windows.map(\.appName))
-
-        return NSWorkspace.shared.runningApplications
-            .compactMap { app -> RunningApp? in
-                guard
-                    app.processIdentifier != ownProcessIdentifier,
-                    !app.isTerminated,
-                    app.activationPolicy == .regular,
-                    let appName = app.localizedName
-                else {
-                    return nil
-                }
-
-                let bundleIdentifier = app.bundleIdentifier ?? ""
-                if !bundleIdentifier.isEmpty {
-                    guard !windowBundleIdentifiers.contains(bundleIdentifier) else { return nil }
-                } else {
-                    guard !windowAppNames.contains(appName) else { return nil }
-                }
-
-                return RunningApp(
-                    processIdentifier: app.processIdentifier,
-                    appName: appName,
-                    bundleIdentifier: bundleIdentifier
-                )
-            }
-            .sorted {
-                $0.appName.localizedStandardCompare($1.appName) == .orderedAscending
-            }
+        return applications.compactMap { app -> RunningApp? in
+            guard app.processIdentifier != ownProcessIdentifier,
+                  !app.isTerminated, app.activationPolicy == .regular,
+                  let appName = app.localizedName else { return nil }
+            return RunningApp(
+                processIdentifier: app.processIdentifier,
+                appName: appName,
+                bundleIdentifier: app.bundleIdentifier ?? ""
+            )
+        }.sorted { $0.appName.localizedStandardCompare($1.appName) == .orderedAscending }
     }
 
     private func startSignalHandling() {
         signal(SIGUSR1, SIG_IGN)
         signal(SIGUSR2, SIG_IGN)
         signal(SIGURG, SIG_IGN)
+        signal(SIGWINCH, SIG_IGN)
 
         let forwardSource = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
         forwardSource.setEventHandler { [weak self] in
@@ -3587,6 +4514,49 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         promptSource.resume()
         windowControlSignalSource = promptSource
+
+        let searchSource = DispatchSource.makeSignalSource(signal: SIGWINCH, queue: .main)
+        searchSource.setEventHandler { [weak self] in self?.showWindowSearch() }
+        searchSource.resume()
+        searchSignalSource = searchSource
+    }
+
+    private func prepareWindowSearch() {
+        let controller = WindowSearchController()
+        controller.loadItems = { completion in
+            DispatchQueue.global(qos: .userInteractive).async {
+                let result = Result { try AeroSpaceClient.allWindows().filter { $0.appPID != getpid() }.map {
+                    WindowSearchItem(windowID: $0.windowID, appName: $0.appName,
+                                     bundleID: $0.appBundleID, title: $0.windowTitle,
+                                     workspace: $0.workspace,
+                                     workspaceLabel: SwitcherConfiguration.workspaceLabel($0.workspace) ?? "",
+                                     monitorName: $0.monitorName)
+                }.sorted {
+                    if $0.workspace != $1.workspace {
+                        return $0.workspace.localizedStandardCompare($1.workspace) == .orderedAscending
+                    }
+                    if $0.appName != $1.appName {
+                        return $0.appName.localizedStandardCompare($1.appName) == .orderedAscending
+                    }
+                    return $0.windowID < $1.windowID
+                } }
+                DispatchQueue.main.async { completion(result) }
+            }
+        }
+        controller.activateItem = { item, completion in
+            AeroSpaceClient.activateSearchWindow(item.windowID, completion: completion)
+        }
+        windowSearchController = controller
+        searchObserver = DistributedNotificationCenter.default().addObserver(
+            forName: searchNotificationName, object: nil, queue: .main
+        ) { [weak self] _ in self?.showWindowSearch() }
+    }
+
+    @objc private func showWindowSearch() {
+        if panel != nil { hideSwitcher() }
+        windowControlPanelController?.hide(deactivateApplication: false)
+        guard let screen = screenUnderPointer() ?? NSScreen.main ?? NSScreen.screens.first else { return }
+        windowSearchController?.show(on: screen)
     }
 
     private func prepareWindowControlPanel() {
@@ -3598,6 +4568,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showWindowControlPanel() {
+        windowSearchController?.hide()
         if panel?.isVisible == true {
             dismiss()
         }
@@ -3813,6 +4784,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func stopCommandTabInterception() {
+        capturedSwitcherKeyCodes.removeAll()
         commandTabRetryTimer?.invalidate()
         commandTabRetryTimer = nil
         if let commandTabRunLoopSource {
@@ -3846,21 +4818,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                 panel.isVisible,
                 panel.frame.contains(NSEvent.mouseLocation),
                 let scrollView = switcherScrollView,
-                let scrollEventCopy = event.copy()
+                let scrollEvent = NSEvent(cgEvent: event)
             else {
                 return Unmanaged.passUnretained(event)
             }
 
-            // A physical mouse can emit discrete wheel events that never reach
-            // NSEvent monitors while Command is held. Handle them at the same
-            // session event tap that owns Command-Tab, before that routing occurs.
-            // Remove Command from the forwarded copy so NSScrollView treats a
-            // discrete mouse-wheel tick as scrolling instead of a modified gesture.
-            scrollEventCopy.flags = scrollEventCopy.flags.subtracting(.maskCommand)
-            guard let scrollEvent = NSEvent(cgEvent: scrollEventCopy) else {
-                return Unmanaged.passUnretained(event)
-            }
-            scrollView.scrollWheel(with: scrollEvent)
+            // Consume once, before modifier-dependent system routing; both
+            // Option-Tab and Command-Tab use the same pixel/line handling.
+            scrollSwitcher(with: scrollEvent, in: scrollView)
+            return nil
+        }
+
+        if interceptSwitcherKeyEvent(type: type, event: event, pointerLocation: NSEvent.mouseLocation) {
             return nil
         }
 
@@ -3891,6 +4860,58 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         return nil
+    }
+
+    private func interceptSwitcherKeyEvent(type: CGEventType, event: CGEvent, pointerLocation: NSPoint) -> Bool {
+        let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+        if type == .keyUp, capturedSwitcherKeyCodes.remove(keyCode) != nil { return true }
+        guard type == .keyDown,
+              let panel, panel.isVisible || isAwaitingPresentation,
+              trackedReleaseModifier == .command,
+              event.flags.contains(.maskCommand),
+              event.flags.intersection([.maskAlternate, .maskControl, .maskShift]).isEmpty,
+              [kVK_ANSI_W, kVK_ANSI_Q, kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3,
+               kVK_ANSI_4, kVK_ANSI_5, kVK_ANSI_6, kVK_ANSI_7, kVK_ANSI_8, kVK_ANSI_9].contains(Int(keyCode)),
+              let keyEvent = NSEvent(cgEvent: event)
+        else { return false }
+        capturedSwitcherKeyCodes.insert(keyCode)
+        guard !keyEvent.isARepeat else { return true }
+        if isAwaitingPresentation {
+            // Do not let Q/W reach the frontmost app before the switcher's
+            // target is ready. Number shortcuts can already be queued safely.
+            if let index = commandSelectionIndex(for: Int(keyCode)) {
+                pendingDirectSelectionIndex = index
+            }
+            return true
+        }
+        let isAction = keyCode == Int64(kVK_ANSI_W) || keyCode == Int64(kVK_ANSI_Q)
+        let actionKey: String?
+        if isAction {
+            reconcileCommandPointer(pointerLocation)
+            actionKey = commandActionTarget?.item.key
+        } else {
+            actionKey = nil
+        }
+        // Swallow before delivery to the frontmost app, even when our panel has
+        // lost key status. Dispatch UI/AX work outside the event-tap callback.
+        DispatchQueue.main.async { [weak self, weak panel] in
+            guard let self, let panel, self.panel === panel, panel.isVisible else { return }
+            if isAction {
+                guard let actionKey, let index = self.orderedItems.firstIndex(where: { $0.key == actionKey }) else {
+                    self.showActionFeedback(localized("This item is no longer available", "该项目已不在列表中"), tone: .neutral)
+                    return
+                }
+                let target = (index: index, item: self.orderedItems[index])
+                if keyCode == Int64(kVK_ANSI_W) {
+                    self.closeSelectedWindow(target: target)
+                } else {
+                    self.quitSelectedApplication(target: target)
+                }
+            } else {
+                _ = self.handleCommandSelectionShortcut(keyEvent, pointerLocation: pointerLocation)
+            }
+        }
+        return true
     }
 
     private func isAeroSpaceRunning() -> Bool {
@@ -3973,7 +4994,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+#if !SWITCHER_ACTION_TESTING
 private let application = NSApplication.shared
 private let applicationDelegate = AppDelegate()
 application.delegate = applicationDelegate
 application.run()
+#endif
