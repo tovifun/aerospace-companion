@@ -299,6 +299,11 @@ test_root=$(mktemp -d "${TMPDIR:-/tmp}/aerospace-companion-test.XXXXXX")
 trap 'rm -rf "$test_root"' EXIT
 test_home="$test_root/home"
 xcrun swiftc \
+    "$root_dir/src/window-switcher/WorkspaceMonitorRouting.swift" \
+    "$root_dir/tests/monitor-routing/main.swift" \
+    -o "$test_root/monitor-routing-tests"
+"$test_root/monitor-routing-tests"
+xcrun swiftc \
     "$root_dir/src/window-switcher/Localization.swift" \
     "$root_dir/src/window-switcher/WindowSearch.swift" \
     "$root_dir/src/window-switcher/WindowSearchController.swift" \
@@ -326,6 +331,7 @@ xcrun swiftc -D SWITCHER_ACTION_TESTING \
     -framework Cocoa -framework ApplicationServices -framework Carbon \
     -framework CoreAudio -framework QuartzCore \
     "$test_root/main.swift" \
+    "$root_dir/src/window-switcher/WorkspaceMonitorRouting.swift" \
     "$root_dir/src/window-switcher/Localization.swift" \
     "$root_dir/src/window-switcher/SwitcherPreferences.swift" \
     "$root_dir/src/window-switcher/SettingsWindowController.swift" \

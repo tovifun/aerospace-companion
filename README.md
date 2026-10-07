@@ -185,6 +185,26 @@ run `~/.local/bin/aerospace-companion-update --with-config`.
 
 ## Workspaces and optional routing
 
+Companion supports an optional automatic monitor policy: workspace 1 goes to the
+laptop, 2–8 to the work display, and all remaining workspaces to the third display.
+With two displays, workspace 1 goes to the first role and everything else to the
+second; with one display, all workspaces use it. Device names identify roles, and
+the policy covers newly created workspaces without a fixed upper workspace number.
+Remove the `workspace-to-monitor-force-assignment` table from your personal config
+before enabling this policy, since native forced assignments prevent workspace moves.
+Replace the names below with your devices and restart Companion after saving:
+
+```sh
+defaults write io.github.tovifun.aerospace-companion.window-switcher workspaceMonitorRoutingProfile -string \
+  '{"primaryNames":["Built-in Retina Display"],"workNames":["DELL P2723QE","KOIOS K2721UD"],"extraNames":["Portrait"]}'
+```
+
+Missing roles fall back to remaining displays. An unnamed third device can still
+serve as the extra display. The background policy normally corrects new or moved
+workspaces within two seconds and waits for stable monitor observations after hotplug.
+It is disabled by default and preserved during updates. Delete the
+`workspaceMonitorRoutingProfile` preference and restart Companion to disable it.
+
 The default uses numbered workspaces 1–10, tiles, and automatic initial
 orientation, with no forced display assignments or app-to-workspace routing.
 New windows are not moved to a numbered workspace by Companion rules.

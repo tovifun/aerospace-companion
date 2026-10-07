@@ -170,6 +170,21 @@ defaults write io.github.tovifun.aerospace-companion.window-switcher \
 
 ## Workspace 与可选分配
 
+Companion 支持可选的自动屏幕分配：三屏时工作区 1 在笔记本屏幕、2–8 在工作屏、
+其余在扩展屏；两屏时 1 在第一屏、其余在第二屏；单屏全部归到当前屏幕。
+它按设备名称识别屏幕角色，插拔稳定后调整，并覆盖新增工作区（包括 11、12 及以后）。
+使用时删除个人配置中的 `workspace-to-monitor-force-assignment` 表，避免原生强制分配阻止移动。
+按实际设备名称修改以下配置，写入后重启 Companion：
+
+```sh
+defaults write io.github.tovifun.aerospace-companion.window-switcher workspaceMonitorRoutingProfile -string \
+  '{"primaryNames":["Built-in Retina Display"],"workNames":["DELL P2723QE","KOIOS K2721UD"],"extraNames":["Portrait"]}'
+```
+
+缺失的设备角色使用剩余屏幕兜底；未配置名称的第三屏也可作为扩展屏。
+启用后，偏离规则或新增的工作区通常在 2 秒内归位；插拔需等待屏幕列表稳定。
+该功能默认关闭，偏好随普通更新保留；删除 `workspaceMonitorRoutingProfile` 并重启可关闭。
+
 默认保留数字工作区 1–10，不预设职业用途，不按 App 自动分配，也不强制绑定显示器。
 使用 `Option + Control + Tab` 将当前 workspace 移到下一块显示器。
 这是 AeroSpace 原生操作，但不保证每次拔插都精确恢复之前的位置。

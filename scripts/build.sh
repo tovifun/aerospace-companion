@@ -47,6 +47,7 @@ xcrun swiftc \
     "$root_dir/src/window-switcher/SettingsWindowController.swift" \
     "$root_dir/src/window-switcher/WorkspaceHeaderMetadata.swift" \
     "$root_dir/src/window-switcher/WorkspaceCatalog.swift" \
+    "$root_dir/src/window-switcher/WorkspaceMonitorRouting.swift" \
     "$root_dir/src/window-switcher/WindowDisplayTitle.swift" \
     "$root_dir/src/window-switcher/SwitcherScroll.swift" \
     "$root_dir/src/window-switcher/SwitcherActions.swift" \

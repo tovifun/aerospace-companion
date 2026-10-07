@@ -436,6 +436,9 @@ private struct WindowControlRequest {
 }
 
 private enum AeroSpaceClient {
+    static func monitorRoutingController(profile: WorkspaceMonitorRoutingProfile) -> WorkspaceMonitorRoutingController {
+        WorkspaceMonitorRoutingController(profile: profile, run: { try run($0) })
+    }
     private static let executablePaths = [
         "/opt/homebrew/bin/aerospace",
         "/usr/local/bin/aerospace",
@@ -1977,6 +1980,7 @@ private final class PermissionGuideWindowController: NSWindowController {
 }
 
 private final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var monitorRoutingController: WorkspaceMonitorRoutingController?
     private static let commandTabEventCallback: CGEventTapCallBack = {
         _, type, event, userInfo in
         guard let userInfo else {
@@ -2093,6 +2097,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         prepareSettingsEntryPoints()
+        if let profile = WorkspaceMonitorRoutingProfile.load() {
+            monitorRoutingController = AeroSpaceClient.monitorRoutingController(profile: profile)
+            monitorRoutingController?.start()
+        }
         applicationTerminationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main
         ) { [weak self] notification in
@@ -2266,6 +2274,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        monitorRoutingController?.stop()
         actionRefreshWorkItem?.cancel()
         reopenRefreshWorkItem?.cancel()
         feedbackDismissWorkItem?.cancel()
