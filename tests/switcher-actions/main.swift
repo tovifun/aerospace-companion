@@ -430,6 +430,79 @@ private extension AppDelegate {
         print("Non-key panel: hover B/W, windowless B, wheel/zoom scrolling, hover C/W, stale target and key-up routing checks passed.")
     }
 
+    static func testAnimatedHugging(mode: SwitcherLayoutMode) {
+        let originalDomain = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        var domain = originalDomain
+        domain["layoutMode"] = mode.rawValue
+        UserDefaults.standard.setVolatileDomain(domain, forName: UserDefaults.argumentDomain)
+        defer { UserDefaults.standard.setVolatileDomain(originalDomain, forName: UserDefaults.argumentDomain) }
+        let first = (1...6).map { fixtureWindow($0, workspace: "1") }
+        let quitting = (7...24).map { fixtureWindow($0, pid: -888, workspace: "1") }
+        let second = (101...104).map { fixtureWindow($0, workspace: "3") }
+        let delegate = fixture(windows: first + quitting + second)
+        let panel = delegate.panel!
+        panel.setFrame(NSRect(x: -20000, y: -20000, width: 588, height: 720), display: false)
+        panel.contentView?.layoutSubtreeIfNeeded()
+        delegate.setSelectedIndex(3)
+        delegate.startFixtureAction(.application(-888), pid: -888)
+        panel.orderFront(nil) // Visible to AppKit, entirely outside all displays.
+        defer { panel.orderOut(nil) }
+        let initial = panel.frame
+        let selectedY = delegate.viewportY("window:4")
+        func screenY(_ key: String) -> CGFloat {
+            let row = delegate.itemRows[key]!
+            return panel.convertPoint(toScreen: row.convert(NSPoint(x: 0, y: row.bounds.midY), to: nil)).y
+        }
+        let selectedScreenY = screenY("window:4")
+        delegate.snapshot(first + second)
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            precondition(delegate.panelResizeTransition == nil && panel.frame.height < initial.height)
+            print("Reduced motion: shrink is immediate and has no animation timer.")
+            return
+        }
+        let transition = delegate.panelResizeTransition!
+        precondition(panel.frame == initial, "A visible shrink must start at the current frame")
+        var previousHeight = initial.height
+        for fraction in [0.0, 0.25, 0.5] {
+            delegate.advancePanelResize(at: transition.startedAt + PanelResizeTransition.duration * fraction)
+            precondition(panel.frame.height <= previousHeight && panel.frame.height > transition.targetFrame.height)
+            precondition(abs(panel.frame.maxY - initial.maxY) < 1)
+            precondition(abs(delegate.viewportY("window:4") - selectedY) < 1)
+            precondition(abs(screenY("window:4") - selectedScreenY) < 1)
+            precondition(delegate.selectedItem?.key == "window:4" && delegate.itemRows["window:4"]!.isSelected)
+            previousHeight = panel.frame.height
+        }
+        delegate.refreshContent()
+        precondition(delegate.panelResizeTransition!.startedAt == transition.startedAt,
+                     "A metadata refresh must not restart the animation")
+        delegate.setSelectedIndex(4)
+        let navigatedY = delegate.viewportY("window:5")
+        let navigatedScreenY = screenY("window:5")
+        delegate.advancePanelResize(at: transition.startedAt + PanelResizeTransition.duration * 0.75)
+        precondition(delegate.selectedItem?.key == "window:5")
+        precondition(abs(delegate.viewportY("window:5") - navigatedY) < 1)
+        precondition(abs(screenY("window:5") - navigatedScreenY) < 1)
+
+        // Another close retargets from the frame currently on screen.
+        let midFrame = panel.frame
+        delegate.snapshot(Array(first.prefix(5)) + second)
+        let retargeted = delegate.panelResizeTransition!
+        precondition(panel.frame == midFrame && retargeted.initialFrame == midFrame)
+        precondition(retargeted.targetFrame.height < transition.targetFrame.height)
+        delegate.advancePanelResize(at: retargeted.startedAt + PanelResizeTransition.duration * 1.1)
+        precondition(abs(panel.frame.height - retargeted.targetFrame.height) < 1)
+        precondition(abs(panel.frame.maxY - initial.maxY) < 1)
+        precondition(abs(delegate.viewportY("window:5") - navigatedY) < 1)
+        precondition(abs(screenY("window:5") - navigatedScreenY) < 1)
+        precondition(delegate.selectedItem?.key == "window:5")
+        precondition(delegate.panelResizeTransition == nil && delegate.panelResizeTimer == nil)
+        delegate.snapshot(Array(first.prefix(4)) + second)
+        precondition(delegate.panelResizeTransition != nil)
+        delegate.hideSwitcher()
+        precondition(delegate.panelResizeTransition == nil && delegate.panelResizeTimer == nil)
+        print("\(mode.rawValue) animated shrink: intermediate frames, stable top/selection, navigation, retargeting, completion and dismissal passed.")
+    }
+
     static func testContentHugging(mode: SwitcherLayoutMode) throws {
         let originalDomain = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
         var domain = originalDomain
@@ -617,6 +690,8 @@ UserDefaults.standard.setVolatileDomain([
 try AppDelegate.testInteraction()
 try AppDelegate.testContentHugging(mode: .compact)
 try AppDelegate.testContentHugging(mode: .standard)
+AppDelegate.testAnimatedHugging(mode: .compact)
+AppDelegate.testAnimatedHugging(mode: .standard)
 AppDelegate.testContinuousHoverActions()
 AppDelegate.testReopenCatalog()
 AppDelegate.testOpeningSelection()

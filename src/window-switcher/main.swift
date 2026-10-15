@@ -56,6 +56,21 @@ private enum SwitcherStyle {
     )
 }
 
+private struct PanelResizeTransition {
+    static let duration: TimeInterval = 0.16
+    let initialFrame: NSRect
+    let targetFrame: NSRect
+    let startedAt: TimeInterval
+
+    func frame(at time: TimeInterval) -> NSRect {
+        let progress = min(1, max(0, (time - startedAt) / Self.duration))
+        let eased = 1 - pow(1 - progress, 3)
+        let height = initialFrame.height + (targetFrame.height - initialFrame.height) * eased
+        return NSRect(x: targetFrame.minX, y: targetFrame.maxY - height,
+                      width: targetFrame.width, height: height)
+    }
+}
+
 private struct AeroWindow: Decodable, Equatable {
     let windowID: Int
     let appName: String
@@ -2056,6 +2071,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var suppressedAutomaticActivationPID: pid_t?
     private weak var actionFeedbackView: SwitcherActionFeedbackView?
     private var keepsPanelFrame = false
+    private var panelResizeTransition: PanelResizeTransition?
+    private var panelResizeTimer: Timer?
     private var watchesActionChanges = false
     private var documentMinimumHeightConstraint: NSLayoutConstraint?
     private var requestWindowClose: (Int, @escaping (Error?) -> Void) -> Void = {
@@ -2274,6 +2291,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        stopPanelResize()
         monitorRoutingController?.stop()
         actionRefreshWorkItem?.cancel()
         reopenRefreshWorkItem?.cancel()
@@ -2780,7 +2798,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             fittedFrame.size.height = min(panel.frame.height, fittedFrame.height)
             fittedFrame.origin = NSPoint(x: panel.frame.minX, y: panel.frame.maxY - fittedFrame.height)
         }
-        if panel.frame != fittedFrame { panel.setFrame(fittedFrame, display: false) }
+        let animatesShrink = panel.isVisible && keepsPanelFrame
+            && fittedFrame.height < panel.frame.height
+            && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if !animatesShrink {
+            stopPanelResize()
+            if panel.frame != fittedFrame { panel.setFrame(fittedFrame, display: false) }
+        }
         panel.contentView = makeContentView(for: targetScreen)
         panel.contentView?.layoutSubtreeIfNeeded()
         if let key = selectedItem?.key { itemRows[key]?.isSelected = true }
@@ -2797,6 +2821,51 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // Refreshing a pending operation must not steal focus from a save dialog.
         reconcileHoveredItemWithPointer()
+        if animatesShrink { startPanelResize(to: fittedFrame) }
+    }
+
+    private func startPanelResize(to frame: NSRect) {
+        guard let panel else { return }
+        // Metadata refreshes must not restart an in-flight transition.
+        if panelResizeTransition?.targetFrame == frame { return }
+        stopPanelResize()
+        panelResizeTransition = PanelResizeTransition(
+            initialFrame: panel.frame, targetFrame: frame,
+            startedAt: ProcessInfo.processInfo.systemUptime
+        )
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+            self?.advancePanelResize(at: ProcessInfo.processInfo.systemUptime)
+        }
+        panelResizeTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func advancePanelResize(at time: TimeInterval) {
+        guard let panel, panel.isVisible, let transition = panelResizeTransition else {
+            stopPanelResize()
+            return
+        }
+        // Capture on every frame so keyboard navigation and wheel input during
+        // the transition keep their latest position rather than being undone.
+        let viewport = switcherScrollView.flatMap {
+            SwitcherScroll.capture(in: $0, rows: itemRows, preferredKey: selectedItem?.key)
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        panel.setFrame(transition.frame(at: time), display: false)
+        panel.contentView?.layoutSubtreeIfNeeded()
+        if let viewport, let scrollView = switcherScrollView {
+            SwitcherScroll.restore(viewport, in: scrollView, rows: itemRows)
+        }
+        reconcileHoveredItemWithPointer()
+        CATransaction.commit()
+        if time - transition.startedAt >= PanelResizeTransition.duration { stopPanelResize() }
+    }
+
+    private func stopPanelResize() {
+        panelResizeTimer?.invalidate()
+        panelResizeTimer = nil
+        panelResizeTransition = nil
     }
 
     private func scrollSwitcher(with event: NSEvent, in scrollView: NSScrollView) {
@@ -4077,6 +4146,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func hideSwitcher() {
+        stopPanelResize()
         isAwaitingPresentation = false
         reopenPresentationDeadline = nil
         trackedReleaseModifier = nil
