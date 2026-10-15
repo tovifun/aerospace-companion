@@ -430,6 +430,58 @@ private extension AppDelegate {
         print("Non-key panel: hover B/W, windowless B, wheel/zoom scrolling, hover C/W, stale target and key-up routing checks passed.")
     }
 
+    static func testContentHugging(mode: SwitcherLayoutMode) throws {
+        let originalDomain = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        var domain = originalDomain
+        domain["layoutMode"] = mode.rawValue
+        UserDefaults.standard.setVolatileDomain(domain, forName: UserDefaults.argumentDomain)
+        defer { UserDefaults.standard.setVolatileDomain(originalDomain, forName: UserDefaults.argumentDomain) }
+        let first = (1...6).map { fixtureWindow($0, workspace: "1") }
+        let quitting = (7...24).map { fixtureWindow($0, pid: -888, workspace: "1") }
+        let second = (101...104).map { fixtureWindow($0, workspace: "3") }
+        let remaining = first + second
+        let delegate = fixture(windows: first + quitting + second)
+        let panel = delegate.panel!
+        panel.setFrame(NSRect(x: -20000, y: -20000, width: 588, height: 720), display: false)
+        panel.contentView?.layoutSubtreeIfNeeded()
+        delegate.setSelectedIndex(3)
+        let oldTop = panel.frame.maxY
+        delegate.startFixtureAction(.application(-888), pid: -888)
+        delegate.snapshot(remaining)
+        precondition(panel.frame.height < 720, "Panel must shrink when quit leaves a shorter list")
+        precondition(abs(panel.frame.height - delegate.switcherFrame(for: NSScreen.main!).height) <= 1)
+        precondition(panel.frame.maxY == oldTop, "Shrinking must keep the top edge stationary")
+        precondition(delegate.selectedItem?.key == "window:4")
+        precondition(delegate.documentMinimumHeightConstraint!.constant == 0,
+                     "A fitting list must release scroll-anchor padding")
+
+        func assertGroupGap(_ subject: AppDelegate) {
+            let document = subject.switcherScrollView!.documentView!
+            let last = subject.itemRows["window:6"]!
+            let next = subject.itemRows["window:101"]!
+            let gap = next.convert(next.bounds, to: document).minY - last.convert(last.bounds, to: document).maxY
+            precondition(abs(gap - SwitcherStyle.groupSpacing - SwitcherStyle.groupHeaderHeight) < 1,
+                         "Extra document height must never stretch a workspace group: \(gap)")
+        }
+        assertGroupGap(delegate)
+        // Long-list deletion can still require trailing scroll-anchor space.
+        // Even then, all extra height must remain below the final group.
+        delegate.documentMinimumHeightConstraint?.constant = 1200
+        panel.contentView?.layoutSubtreeIfNeeded()
+        assertGroupGap(delegate)
+        precondition(delegate.switcherScrollView!.documentView!.bounds.height >= 1200)
+        delegate.refreshContent()
+        assertGroupGap(delegate)
+        precondition(delegate.documentMinimumHeightConstraint!.constant == 0)
+        try delegate.saveFixtureSnapshot("\(mode.rawValue)-hug-after-quit")
+        delegate.startFixtureAction(.application(-999), pid: -999)
+        delegate.snapshot(Array(first.prefix(1)))
+        precondition(abs(panel.frame.height - delegate.switcherFrame(for: NSScreen.main!).height) <= 1)
+        precondition(panel.frame.maxY == oldTop)
+        precondition(delegate.documentMinimumHeightConstraint!.constant == 0)
+        print("\(mode.rawValue): quit content hugging, fixed top edge, compact group gaps and trailing-only anchor padding checks passed.")
+    }
+
     static func testInteraction() throws {
         let windows = (1...24).map { fixtureWindow($0) }
         let delegate = fixture(windows: windows)
@@ -563,6 +615,8 @@ UserDefaults.standard.setVolatileDomain([
     "hoveredItemActionPriority": false,
 ], forName: UserDefaults.argumentDomain)
 try AppDelegate.testInteraction()
+try AppDelegate.testContentHugging(mode: .compact)
+try AppDelegate.testContentHugging(mode: .standard)
 AppDelegate.testContinuousHoverActions()
 AppDelegate.testReopenCatalog()
 AppDelegate.testOpeningSelection()

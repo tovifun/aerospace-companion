@@ -2773,16 +2773,21 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         let viewport = preservingViewport ? switcherScrollView.flatMap {
             SwitcherScroll.capture(in: $0, rows: itemRows, preferredKey: preferredViewportKey ?? selectedItem?.key)
         } : nil
-        if !keepsPanelFrame {
-            panel.setFrame(switcherFrame(for: targetScreen), display: false)
+        var fittedFrame = switcherFrame(for: targetScreen)
+        if keepsPanelFrame {
+            // Keep existing rows stationary while a long list is being edited,
+            // but let a shorter list hug its content by lifting the bottom edge.
+            fittedFrame.size.height = min(panel.frame.height, fittedFrame.height)
+            fittedFrame.origin = NSPoint(x: panel.frame.minX, y: panel.frame.maxY - fittedFrame.height)
         }
+        if panel.frame != fittedFrame { panel.setFrame(fittedFrame, display: false) }
         panel.contentView = makeContentView(for: targetScreen)
         panel.contentView?.layoutSubtreeIfNeeded()
         if let key = selectedItem?.key { itemRows[key]?.isSelected = true }
         if let viewport, let scrollView = switcherScrollView {
-            if keepsPanelFrame {
+            if keepsPanelFrame && listContentHeight > scrollView.contentView.bounds.height {
                 // Leave just enough trailing space to avoid a jump when removing
-                // items at the end of a scrolled list. Reset on the next invocation.
+                // items at the end of a scrolled list. A fitting list needs none.
                 documentMinimumHeightConstraint?.constant = SwitcherScroll.anchoredY(
                     viewport, in: scrollView, rows: itemRows
                 ) + scrollView.contentView.bounds.height
@@ -2851,6 +2856,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         groupStack.orientation = .vertical
         groupStack.alignment = .width
         groupStack.spacing = SwitcherStyle.groupSpacing
+        groupStack.setHuggingPriority(.required, for: .vertical)
         documentView.addSubview(groupStack)
         scrollView.documentView = documentView
 
@@ -2884,7 +2890,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let naturalBottom = groupStack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor)
-        naturalBottom.priority = .defaultLow
+        // Scroll anchoring may extend the document. That space belongs below
+        // the groups, not inside the first workspace's stack.
+        naturalBottom.priority = .fittingSizeCompression
         let minimumHeight = documentView.heightAnchor.constraint(greaterThanOrEqualToConstant: 0)
         documentMinimumHeightConstraint = minimumHeight
         NSLayoutConstraint.activate([
@@ -2957,12 +2965,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         return root
     }
 
-    private func switcherFrame(for screen: NSScreen) -> NSRect {
-        let groups = workspaceGroups()
-        let listHeight = SwitcherStyle.metrics.listHeight(
-            workspaceWindowCounts: groups.map { $0.windows.count },
+    private var listContentHeight: CGFloat {
+        SwitcherStyle.metrics.listHeight(
+            workspaceWindowCounts: workspaceGroups().map { $0.windows.count },
             windowlessAppCount: windowlessApps.count
         )
+    }
+
+    private func switcherFrame(for screen: NSScreen) -> NSRect {
         let visibleFrame = screen.visibleFrame
         let width = min(588, max(360, visibleFrame.width - 48))
         let maximumHeight = min(
@@ -2974,7 +2984,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         let height = min(
             max(
                 176,
-                listHeight
+                listContentHeight
                     + surfaceChromeHeight
                     + SwitcherStyle.shadowMargin * 2
             ),
@@ -3829,8 +3839,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func beginActionFeedback(_ action: PendingSwitcherAction) {
-        // Discard any snapshot started before this command, and keep the panel's
-        // screen position and height for the rest of this invocation.
+        // Discard snapshots started before this command and keep the panel's
+        // top edge stable. Its bottom can shrink as the list gets shorter.
         loadGeneration += 1
         isRefreshing = false
         isSnapshotLoading = false
